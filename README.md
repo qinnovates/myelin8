@@ -528,6 +528,46 @@ engram/
 - Atomic writes, registry field filtering, no shell=True
 - Red-team reviewed by 3 independent security personas (offensive, crypto, supply chain)
 
+### Security recommendations
+
+These recommendations come from a 4-persona security quorum review (CISO, pentester, GRC analyst, DevSecOps):
+
+**1. The semantic index is not encrypted.** `~/.engram/semantic-index.json` contains keywords, summaries, and topic metadata for every artifact. An attacker with filesystem read access gets a searchable map of what you discussed without needing the encryption key. Run `chmod 700 ~/.engram` to protect the entire directory. Encrypting the index itself is a planned future feature.
+
+**2. The boilerplate cache stores content in plaintext.** `~/.engram/boilerplate/` contains extracted system prompts and repeated session content, stored unencrypted. On shared servers, set `chmod 700` on this directory. Treat it as part of your sensitive data footprint.
+
+**3. Recalled artifacts persist as plaintext until the next tiering cycle.** When you `engram recall` a frozen encrypted artifact, it returns to hot tier as plaintext on disk. Run `engram run` after you're done with recalled sensitive data to re-compress and re-encrypt it.
+
+**4. Back up your Engram state files.** Loss of `~/.engram/artifact-registry.json` means Engram can't locate compressed artifacts. Loss of `semantic-index.json` means search is broken. Include `~/.engram/` in your backup strategy alongside the encrypted artifacts themselves.
+
+**5. Verify the `age` binary after installation.** Engram's entire encryption model trusts the `age` CLI. After install, verify: run `brew info age` to confirm the source tap, check `age --version` matches the expected release, and on high-security systems, build `age` from source with a pinned commit.
+
+**6. On shared servers, use per-user Engram instances.** The semantic index is shared and unencrypted by default. All users with read access can see artifact summaries for all team members. If that's unacceptable, run separate instances: `engram --config ~/.engram-personal/config.json`. Encryption protects artifact content, not metadata.
+
+**7. Automate tiering with locked-down cron.** When using cron, specify absolute paths (`/usr/local/bin/engram run`), set `PATH` explicitly in the crontab, and on shared servers run under a dedicated service account. Never run as root.
+
+**8. If a key is compromised:** (1) Generate new keypair immediately, (2) Recall all artifacts encrypted with the old key, (3) Re-encrypt with the new key via `engram run`, (4) Revoke the old key from your Keychain/Vault, (5) Audit vault access logs for unauthorized retrieval, (6) Assess the exposure window.
+
+**9. Engram does not currently produce audit logs.** Encrypt/decrypt/recall operations are not logged to a separate audit trail. For compliance environments (SOC 2, HIPAA), wrap `engram` commands in a logging script or use filesystem audit tools (`auditd` on Linux, Endpoint Security Framework on macOS).
+
+**10. Secure uninstallation:** (1) `engram recall` any encrypted artifacts you need, (2) Verify you can read them, (3) `rm -rf ~/.engram/`, (4) Remove Keychain entries: `security delete-generic-password -s engram -a warm-key` and `cold-key`, (5) `pip uninstall engram`, (6) Remove cron jobs.
+
+### Threat model
+
+Engram protects against:
+- Data at rest on stolen/lost/compromised devices
+- "Harvest now, decrypt later" quantum attacks (via ML-KEM-768)
+- Unauthorized read access to compressed AI session data
+- Disk forensics on decommissioned hardware
+
+Engram does NOT protect against:
+- A compromised process with memory access to the running Python interpreter
+- An attacker who has your private key
+- A trojanized `age` binary (verify after installation)
+- A malicious AI assistant that exfiltrates data before compression
+- The semantic index and boilerplate cache (unencrypted metadata)
+- An attacker with root access who can read Keychain items (on non-Apple-Silicon, Keychain is software-only)
+
 ## Requirements
 
 - Python 3.10+
