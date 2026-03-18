@@ -574,6 +574,8 @@ Encryption is optional but recommended. Engram works without it — you get comp
 
 **Config security:** `~/.engram/config.json` contains your public key and scan target paths. While the public key alone can't decrypt anything, it's still operational metadata you shouldn't leak. The config is `.gitignore`d by default, written with `0600` permissions (owner-only), and should never be committed to a repo or shared publicly.
 
+**Advanced recommendation:** For production or team environments, I recommend running Engram's encryption under a dedicated service account with RBAC (role-based access control) — a distinct account that handles only encryption/decryption operations, with no other privileges on the system. This separates the encryption boundary from your daily user account, so a compromised user session can't access the key material. Setting up RBAC and service accounts is out of scope for this tool, but if you're in an environment where that matters, you already know how to do it.
+
 **Encryption scope:** PQ encryption (ML-KEM-768, FIPS 203) protects data at rest. It does not protect against a compromised process with memory access or an attacker who has your private key. The `age` tool's PQ hybrid is described by its author as production-ready; the classical X25519 + ChaCha20-Poly1305 layer was audited by Cure53.
 
 ## AI Disclosure
