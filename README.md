@@ -513,6 +513,33 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+## Disclaimer
+
+**This software handles your data.** Engram compresses and optionally encrypts AI session logs, memory files, and conversation history. While it has been security-reviewed (4 rounds, 3 independent red-team personas), it is provided as-is under the MIT license with no warranty.
+
+**Before using in production:**
+- Run `engram run --dry-run` first to preview changes without modifying files
+- Keep backups of your `~/.claude/` directory before first run
+- If using encryption, test key recovery (`engram recall`) before relying on it for critical data
+- The compression pipeline is lossy in one direction only: boilerplate stripping removes repeated system prompts and stores them separately. Full content is reconstructable via `engram recall`, but if the boilerplate store (`~/.engram/boilerplate/`) is deleted, stripped content is lost
+
+**Encryption is not a substitute for access control.** Engram's PQ encryption protects data at rest. It does not protect against a compromised process with memory access, a malicious plugin running in the same session, or an attacker who has your private key.
+
+**Post-quantum claims are scoped.** ML-KEM-768 (FIPS 203) is NIST-standardized and used by OpenSSH 10.0. The `age` tool's PQ hybrid implementation is described by its author as production-ready but has not received a published independent audit specific to the PQ integration. The classical X25519 + ChaCha20-Poly1305 layer has been audited by Cure53.
+
+## AI Disclosure
+
+This project was built with extensive AI assistance (Claude Opus 4.6, Anthropic). AI was used for:
+- Code generation (all Python modules)
+- Security review (4 rounds of multi-persona red-team analysis)
+- Compression research (Splunk/ELK/Parquet architecture study)
+- Documentation and blog post drafting
+- Test generation
+
+All code was reviewed by the author. All factual claims were independently fact-checked (7 claims verified against primary sources, 4 corrections applied). All security findings were verified and fixed. The author takes full responsibility for the published content.
+
+Every git commit includes `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>` for full transparency.
+
 ## License
 
 MIT
