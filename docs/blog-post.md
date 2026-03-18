@@ -1,6 +1,6 @@
 ---
-title: "Architecting Brains' Memory To Solve AI Context Issues"
-subtitle: "Semantic Indexing, KV Caching, and Lookup Tables for AI Memory."
+title: "Architecting Brain's Memory To Solve AI Context Persistence"
+subtitle: "A Semantic Indexing, KV Caching, and Lookup Tables approach for AI Memory."
 date: 2026-03-18
 author: "Kevin Qi"
 tags: [engram, ai-memory, compression, post-quantum, kv-cache, lookup-tables, semantic-indexing, deepseek, parquet]
@@ -9,9 +9,9 @@ fact_checked: true
 ai_assisted: true
 ---
 
-# Architecting Brains' Memory To Solve AI Context Issues
+# Architecting Brain's Memory To Solve AI Context Persistence
 
-*Semantic Indexing, KV Caching, and Lookup Tables for AI Memory.*
+*A Semantic Indexing, KV Caching, and Lookup Tables approach for AI Memory.*
 
 AI context windows have a hard limit. Fill it up and the oldest memories fall off. Your assistant forgets what you told it last week.
 

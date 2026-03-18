@@ -1,5 +1,9 @@
 # Engram
 
+**Architecting Brain's Memory To Solve AI Context Persistence**
+
+*A Semantic Indexing, KV Caching, and Lookup Tables approach for AI Memory.*
+
 AI context windows have a hard limit. Fill it up and the oldest memories fall off. Your assistant forgets what you told it last week.
 
 Engram solves this the way the brain does. Your brain doesn't hold everything in working memory. It tiers: recent experiences stay vivid (hot), recent days consolidate (warm), older memories compress into patterns (cold), deep memories take effort to surface (frozen). Each tier trades retrieval speed for storage efficiency.
