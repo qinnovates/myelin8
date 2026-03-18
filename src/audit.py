@@ -58,13 +58,15 @@ class AuditLogger:
 
     def _ensure_log(self) -> None:
         """Create log file with restricted permissions if it doesn't exist."""
-        if not self.log_path.exists():
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
             fd = os.open(
                 str(self.log_path),
-                os.O_CREAT | os.O_WRONLY, 0o600,
+                os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600,
             )
             os.close(fd)
+        except FileExistsError:
+            pass  # Already exists — no action needed
 
     def _write(self, line: str) -> None:
         """Append a line to the audit log. Blocks lines containing secrets/PII."""

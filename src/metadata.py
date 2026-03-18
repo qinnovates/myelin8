@@ -16,6 +16,7 @@ Splunk's cache manager tracks bucket access with LRU timestamps.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -85,6 +86,7 @@ class MetadataStore:
                 import shutil
                 backup = self.db_path.with_suffix(".corrupt.bak")
                 shutil.copy2(self.db_path, backup)
+                os.chmod(str(backup), 0o600)
                 self._artifacts = {}
 
     def save(self, force: bool = False) -> None:

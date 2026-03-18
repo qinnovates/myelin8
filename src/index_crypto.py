@@ -156,6 +156,8 @@ class IndexCrypto:
                     # Reject path traversal, absolute paths, symlinks, hardlinks
                     if member.name.startswith("/") or ".." in member.name:
                         raise ValueError(f"Unsafe path in index bundle: {member.name}")
+                    if "\x00" in member.name:
+                        raise ValueError(f"Null byte in index bundle member name")
                     if member.issym() or member.islnk():
                         if member.linkname.startswith("/") or ".." in member.linkname:
                             raise ValueError(f"Unsafe link in index bundle: {member.linkname}")
@@ -189,6 +191,8 @@ class IndexCrypto:
                     for member in tar.getmembers():
                         if member.name.startswith("/") or ".." in member.name:
                             raise ValueError(f"Unsafe path in boilerplate: {member.name}")
+                        if "\x00" in member.name:
+                            raise ValueError(f"Null byte in boilerplate member name")
                         if member.issym() or member.islnk():
                             if member.linkname.startswith("/") or ".." in member.linkname:
                                 raise ValueError(f"Unsafe link in boilerplate: {member.linkname}")

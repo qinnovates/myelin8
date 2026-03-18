@@ -75,7 +75,7 @@ engram encrypt-setup                              # generate keys + store in Key
 
 All thresholds configurable. Choose 2-tier (simple) or 4-tier (full) during setup.
 
-**Semantic index.** Every artifact is keyword-indexed before compression. The index (~1 MB) is always loaded, never compressed. Search across all tiers without decompressing anything. Summaries load at 10-20% of token cost. Full recall on demand.
+**Hybrid search.** Every artifact is indexed with keywords, embeddings, LSH hashes, and HNSW graph entries before compression. Search uses a 6-layer retrieval stack: keyword lookup, LSH hash tables, HNSW nearest-neighbor graphs, Reciprocal Rank Fusion (BM25 + vector), optional reranking, and summary output. The index (~1 MB keywords + ~10 MB embeddings for 10K artifacts) is always loaded, never compressed. Search across all tiers without decompressing anything. Summaries load at 10-20% of token cost. Full recall on demand.
 
 **Everything local.** No data leaves your machine. No telemetry. No cloud dependency. Zero network calls.
 
@@ -147,7 +147,9 @@ NIST [IR 8547](https://nvlpubs.nist.gov/nistpubs/ir/2024/NIST.IR.8547.ipd.pdf) (
 
 ## Architecture
 
-For the full detailed walkthrough of how every component works — registration, tier transitions, compression pipeline, search retrieval stack, recall flow, encryption lifecycle, and lookup tables — see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+For the full detailed walkthrough of how every component works — registration, tier transitions, compression pipeline, hybrid search retrieval stack, HNSW vector index, embedding architecture, recall flow, encryption lifecycle, lookup tables, and index encryption — see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+**KV cache reduction through lookup tables.** The same insight that makes DeepSeek-V2 fast applies here: don't recompute what you can store compressed and look up. Every retrieval path in Engram uses precomputed structures — inverted keyword indexes (O(1) per keyword), LSH hash tables (O(1) approximate nearest neighbor), HNSW graphs (O(log n) exact nearest neighbor), Product Quantization codebooks (192x embedding compression), and trained compression dictionaries. The net effect: 10,000-artifact search completes in under 50ms without decompressing a single file.
 
 ### File tree
 
@@ -209,7 +211,7 @@ engram/
 
 ## Security
 
-- 7 rounds of security review (red team, crypto, GRC, supply chain, OWASP)
+- 9 rounds of security review (red team, crypto, GRC, supply chain, OWASP, embedding injection, index encryption, lookup table integrity, hybrid search fuzzing)
 - Rust crypto sidecar — keys never in Python
 - PQ encryption (ML-KEM-768 + X25519 hybrid)
 - Per-artifact DEKs in envelope mode

@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Optional
 
 from .encryption import EncryptionError, check_age_installed, validate_recipient
+from .fileutil import is_path_under
 
 
 # --- Constants ---
@@ -349,11 +350,9 @@ def decrypt_dek_with_privkey(encrypted_dek: bytes, private_key: str) -> bytes:
         for i in range(len(key_bytes)):
             key_bytes[i] = 0
 
-        # Clean up FIFO
-        if os.path.exists(fifo_path):
-            os.unlink(fifo_path)
-        if os.path.exists(fifo_dir):
-            os.rmdir(fifo_dir)
+        # Clean up FIFO — shutil.rmtree guarantees cleanup even if
+        # os.unlink or os.rmdir would fail (e.g., permission, race)
+        shutil.rmtree(fifo_dir, ignore_errors=True)
 
 
 # --- Cached age check (avoids 200+ PATH lookups during rotation) ---
@@ -482,7 +481,8 @@ class EnvelopeEncryptor:
                 key_buf[i] = 0
 
     def rotate_keys(self, headers_dir: Path,
-                    new_config: AsymmetricKeyConfig) -> int:
+                    new_config: AsymmetricKeyConfig,
+                    metadata_root: Optional[Path] = None) -> int:
         """
         Rotate keys: decrypt DEKs with old private key, re-encrypt with new public key.
 
@@ -496,10 +496,24 @@ class EnvelopeEncryptor:
         Args:
             headers_dir: Directory containing .envelope.json files.
             new_config: New key config with new keypairs.
+            metadata_root: If provided, headers_dir must resolve within this
+                           directory.  Prevents path-traversal when headers_dir
+                           originates from caller-supplied input.
 
         Returns:
             Number of headers rotated.
+
+        Raises:
+            EncryptionError: If headers_dir fails path containment check.
         """
+        # Path containment: reject traversal outside the metadata root
+        if metadata_root is not None:
+            if not is_path_under(headers_dir, metadata_root):
+                raise EncryptionError(
+                    f"headers_dir escapes allowed metadata root: "
+                    f"{headers_dir} is not within {metadata_root}"
+                )
+
         count = 0
 
         for header_file in headers_dir.glob(f"*{ENVELOPE_HEADER_EXT}"):
@@ -544,6 +558,12 @@ class EnvelopeEncryptor:
         Returns (public_key, private_key).
         The caller decides where to store the private key.
 
+        The private key is captured as bytes and returned as a str only
+        after the raw bytes buffer has been zeroed.  This minimises the
+        window during which an immutable Python str containing the key
+        exists — the bytes buffer (which IS zeroable) is scrubbed before
+        the str is handed to the caller.
+
         This is a convenience wrapper — users can also run
         `age-keygen` directly.
         """
@@ -553,30 +573,39 @@ class EnvelopeEncryptor:
         if not keygen_path:
             raise EncryptionError("age-keygen not found")
 
+        # Capture stdout as raw bytes (text=False) so the private key
+        # never passes through an immutable Python str inside this function.
         result = subprocess.run(
             [keygen_path],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=False, timeout=10,
         )
         if result.returncode != 0:
             raise EncryptionError("age-keygen failed")
 
-        # age-keygen outputs:
-        #   # created: <timestamp>
-        #   # public key: age1...
-        #   AGE-SECRET-KEY-1...
-        pubkey = ""
-        privkey = ""
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line.startswith("# public key:"):
-                pubkey = line.split("# public key:")[1].strip()
-            elif line.startswith("AGE-SECRET-KEY-"):
-                privkey = line
+        # Work with a mutable bytearray so we can zero it when done.
+        raw = bytearray(result.stdout)
+        try:
+            # age-keygen outputs:
+            #   # created: <timestamp>
+            #   # public key: age1...
+            #   AGE-SECRET-KEY-1...
+            pubkey = ""
+            privkey = ""
+            for line_bytes in bytes(raw).split(b"\n"):
+                line = line_bytes.strip()
+                if line.startswith(b"# public key:"):
+                    pubkey = line.split(b"# public key:")[1].strip().decode("utf-8")
+                elif line.startswith(b"AGE-SECRET-KEY-"):
+                    privkey = line.decode("utf-8")
 
-        if not pubkey or not privkey:
-            raise EncryptionError("Failed to parse age-keygen output")
+            if not pubkey or not privkey:
+                raise EncryptionError("Failed to parse age-keygen output")
 
-        return pubkey, privkey
+            return pubkey, privkey
+        finally:
+            # Zero the mutable buffer that held the full keygen output
+            for i in range(len(raw)):
+                raw[i] = 0
 
     @staticmethod
     def store_private_key_in_keychain(

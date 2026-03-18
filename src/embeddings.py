@@ -214,13 +214,14 @@ class EmbeddingIndex:
             return
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.chmod(0o700)  # Restrict — embeddings are sensitive metadata
+        from .fileutil import atomic_write_text
         for tier in self._dirty:
             paths_file = self._tier_paths_file(tier)
             emb_file = self._tier_embeddings_file(tier)
-            with open(paths_file, "w") as f:
-                json.dump(self._paths[tier], f)
+            atomic_write_text(paths_file, json.dumps(self._paths[tier]))
             if self._embeddings[tier] is not None:
                 np.save(emb_file, self._embeddings[tier])
+                os.chmod(str(emb_file), 0o600)
         self._dirty.clear()
 
     # --- Add / Remove ---

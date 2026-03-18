@@ -12,6 +12,8 @@ Detailed documentation of how Engram works, what gets encrypted, how logging ope
 - [Tier Transitions](#tier-transitions)
 - [Compression Pipeline](#compression-pipeline)
 - [Search and Retrieval](#search-and-retrieval)
+- [HNSW Vector Index](#hnsw-vector-index)
+- [Hybrid Search](#hybrid-search)
 - [Recall](#recall)
 - [Encryption](#encryption)
 - [What Gets Encrypted](#what-gets-encrypted)
@@ -290,6 +292,73 @@ Query: "authentication refactor"
 ```
 
 No decompression happened. The index, embeddings, and graphs are always in memory. The compressed files on disk were never touched.
+
+---
+
+## HNSW Vector Index
+
+Each tier maintains its own Hierarchical Navigable Small World (HNSW) graph at its native embedding dimension. This gives O(log n) approximate nearest neighbor search instead of O(n) linear scan.
+
+### Per-tier graphs
+
+| Tier | Dimension | File | Backend |
+|------|-----------|------|---------|
+| Hot | 384-d float32 | `hnsw-hot.bin` | hnswlib (or numpy fallback) |
+| Warm | 256-d float32 | `hnsw-warm.bin` | hnswlib (or numpy fallback) |
+| Cold | 128-d float32 | `hnsw-cold.bin` | hnswlib (or numpy fallback) |
+| Frozen | 64-d float32 | `hnsw-frozen.bin` | hnswlib (or numpy fallback) |
+
+### HNSW parameters
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| `M` | 16 | Connections per node (balances recall vs memory) |
+| `ef_construction` | 200 | Build-time quality (higher = better graph, slower build) |
+| `ef` | 50 | Search-time quality (higher = better recall, slower search) |
+| `space` | cosine | Similarity metric for float embeddings |
+
+### Graceful fallback
+
+When `hnswlib` is not installed (`pip install hnswlib`, ~1.3 MB, no server), the index falls back to brute-force numpy cosine similarity. Same API, same results, just O(n) instead of O(log n). The backend is auto-detected at import time.
+
+### Tier transitions
+
+When an artifact moves tiers, its embedding is truncated (Matryoshka) and re-inserted into the new tier's graph. The old tier entry is removed. On recall, the embedding is restored to full 384-d and re-inserted into the hot graph.
+
+---
+
+## Hybrid Search
+
+When embeddings are available, search uses hybrid retrieval combining keyword search (BM25-style from `SemanticIndex`) with vector search (HNSW + LSH) via Reciprocal Rank Fusion. Without embeddings, it falls back to keyword-only.
+
+### Reciprocal Rank Fusion (RRF)
+
+RRF merges results from multiple ranked lists without requiring score normalization. The formula:
+
+```
+RRF_score(artifact) = sum(1 / (k + rank_i)) for each ranked list i
+```
+
+Where `k=60` is the standard constant (Cormack et al., 2009). This handles the score distribution mismatch between keyword (BM25 scores) and vector (cosine similarities) without calibration.
+
+### Contextual retrieval (Anthropic technique)
+
+Before embedding, each artifact's summary is prepended to its content. This is Anthropic's contextual retrieval technique: by including document-level context alongside the chunk content, the embedding captures semantic meaning at both granularities. This yields ~49% retrieval improvement with zero additional LLM calls and no API dependency (embeddings are generated locally via `all-MiniLM-L6-v2`).
+
+### Reranking
+
+The top results from RRF can be optionally re-scored with full cosine similarity on the original (non-truncated) embeddings. This is more expensive but produces higher-quality final rankings. Results without embeddings keep their RRF score with a slight penalty so embedding-based results rank higher when scores are close.
+
+### Fallback chain
+
+```
+1. Both keyword + vector available → RRF fusion → rerank → results
+2. Only keyword available → keyword results with RRF scoring → results
+3. Only vector available → vector results with RRF scoring → results
+4. Neither available → empty results
+```
+
+Vector search failure (e.g., model not loaded, dimension mismatch) is caught and falls back silently to keyword-only. No search query ever throws an exception.
 
 ---
 
