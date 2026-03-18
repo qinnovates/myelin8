@@ -268,8 +268,6 @@ class TieringEngine:
         Reads the .envelope.json header, resolves the tier's private key
         from the configured source (Keychain, Vault, env), and decrypts.
         """
-        from .encryption import decrypt_file, EncryptionConfig as SimpleEnc
-
         enc = self.config.encryption
         source_map = {
             "warm": enc.warm_private_source,
@@ -289,24 +287,49 @@ class TieringEngine:
         from .envelope import _resolve_private_key
         private_key = _resolve_private_key(private_source)
 
-        # Write identity to temp for age -d -i (needed for simple decrypt_file)
-        import tempfile
-        key_fd, key_path = tempfile.mkstemp(prefix="engram-", suffix=".key")
-        try:
-            import os
-            with os.fdopen(key_fd, "w") as f:
-                f.write(private_key)
-            os.chmod(key_path, 0o600)
+        # Use FIFO (named pipe) — private key NEVER touches disk as a file.
+        # Same approach as envelope.py:decrypt_dek_with_privkey.
+        import os
+        import threading
+        engram_dir = self.config.resolve_metadata_dir()
+        fifo_dir = os.path.join(str(engram_dir), ".fifo-tmp")
+        os.makedirs(fifo_dir, mode=0o700, exist_ok=True)
+        fifo_path = os.path.join(fifo_dir, "identity")
 
-            # Decrypt using the tier-specific identity
-            cfg = SimpleEnc(enabled=True, identity_path=key_path)
-            return decrypt_file(encrypted_path, cfg)
+        key_bytes = bytearray(private_key.encode("utf-8"))
+        try:
+            if os.path.exists(fifo_path):
+                os.unlink(fifo_path)
+            os.mkfifo(fifo_path, mode=0o600)
+
+            # age reads the identity from the FIFO
+            proc = subprocess.Popen(
+                ["age", "-d", "-i", fifo_path,
+                 "-o", str(encrypted_path.with_suffix("")),
+                 str(encrypted_path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+            # Write key to FIFO in thread (avoids deadlock)
+            def _write_fifo() -> None:
+                with open(fifo_path, "wb") as f:
+                    f.write(key_bytes)
+
+            writer = threading.Thread(target=_write_fifo, daemon=True)
+            writer.start()
+            _, stderr = proc.communicate(timeout=30)
+            writer.join(timeout=5)
+
+            if proc.returncode != 0:
+                raise EncryptionError("age decrypt failed for envelope recall")
+
+            return encrypted_path.with_suffix("")
         finally:
-            # Zero and delete the temp key file
-            key_p = Path(key_path)
-            if key_p.exists():
-                key_p.write_bytes(b"\x00" * 256)
-                key_p.unlink()
+            # Zero key material
+            for i in range(len(key_bytes)):
+                key_bytes[i] = 0
+            if os.path.exists(fifo_path):
+                os.unlink(fifo_path)
 
     def scan(self) -> list[Path]:
         """

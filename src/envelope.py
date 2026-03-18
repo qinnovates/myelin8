@@ -459,21 +459,25 @@ class EnvelopeEncryptor:
         # Retrieve private key on-demand from configured source
         private_key = _resolve_private_key(tier_keys.private_key_source)
 
-        # Validate encrypted DEK hex before passing to age
+        # Convert to bytearray immediately for zeroing on ALL paths
+        key_buf = bytearray(private_key.encode("utf-8"))
         try:
-            encrypted_dek = bytes.fromhex(header.encrypted_dek_hex)
-        except ValueError:
-            raise EncryptionError("Invalid encrypted DEK format in envelope header")
+            # Validate encrypted DEK hex
+            try:
+                encrypted_dek = bytes.fromhex(header.encrypted_dek_hex)
+            except ValueError:
+                raise EncryptionError("Invalid encrypted DEK format in envelope header")
 
-        if not encrypted_dek or len(encrypted_dek) < 50:
-            raise EncryptionError("Encrypted DEK too short — corrupted envelope header")
+            if not encrypted_dek or len(encrypted_dek) < 50:
+                raise EncryptionError("Encrypted DEK too short — corrupted envelope header")
 
-        # Decrypt DEK with private key (asymmetric)
-        # Private key is passed to decrypt_dek_with_privkey which handles
-        # zeroing via bytearray internally
-        dek = decrypt_dek_with_privkey(encrypted_dek, private_key)
-
-        return dek
+            # Decrypt DEK with private key (asymmetric)
+            dek = decrypt_dek_with_privkey(encrypted_dek, bytes(key_buf).decode("utf-8"))
+            return dek
+        finally:
+            # Zero key material on ALL paths (success, error, exception)
+            for i in range(len(key_buf)):
+                key_buf[i] = 0
 
     def rotate_keys(self, headers_dir: Path,
                     new_config: AsymmetricKeyConfig) -> int:
@@ -614,18 +618,18 @@ class EnvelopeEncryptor:
                 capture_output=True, timeout=10,
             )
 
-        # Add to Keychain
+        # Add to Keychain — pass key via stdin, NOT as argv (argv visible in ps)
         # -T "" means no application is trusted by default — user must authorize via Touch ID
         result = subprocess.run(
             ["security", "add-generic-password",
              "-s", service, "-a", account,
-             "-w", private_key,
+             "-w",  # reads password from stdin when no value follows
              "-T", ""],
-            capture_output=True, text=True, timeout=10,
+            input=private_key, capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
             raise EncryptionError(
-                f"Failed to store key in Keychain: {result.stderr.strip()}"
+                "Failed to store key in Keychain. Check Keychain access permissions."
             )
 
         return f"keychain:{service}:{account}"

@@ -159,6 +159,8 @@ def encrypt_file(
         cmd, capture_output=True, text=True, timeout=300
     )
     if result.returncode != 0:
+        # SECURITY: Do NOT include result.stderr in this message — it may
+        # contain key fragments or identity path from age debug output.
         raise EncryptionError("age encrypt failed. Run with --verbose for details.")
 
     if remove_original and output_path.exists():
@@ -206,6 +208,7 @@ def decrypt_file(
         cmd, capture_output=True, text=True, timeout=300
     )
     if result.returncode != 0:
+        # SECURITY: Do NOT include result.stderr — may contain key/identity info
         raise EncryptionError("age decrypt failed. Run with --verbose for details.")
 
     if remove_encrypted and output_path.exists():
