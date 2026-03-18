@@ -256,11 +256,13 @@ class SemanticIndex:
         # Sort by relevance (descending), then by recency (descending)
         scored.sort(key=lambda pair: (pair[0], -pair[1].idle_days), reverse=True)
 
-        # Set scores on returned copies only
+        # Return copies with scores set — never mutate shared index entries
+        import copy
         results = []
         for score, entry in scored[:max_results]:
-            entry.relevance_score = score
-            results.append(entry)
+            result_entry = copy.copy(entry)
+            result_entry.relevance_score = score
+            results.append(result_entry)
         return results
 
     def get(self, path: Path) -> Optional[ArtifactSummary]:

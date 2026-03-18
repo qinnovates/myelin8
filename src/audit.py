@@ -17,6 +17,10 @@ import time
 from pathlib import Path
 
 
+# 10 MB cap — prevents disk fill under adversarial conditions
+MAX_AUDIT_BYTES = 10 * 1024 * 1024
+
+
 class AuditLogger:
     """Append-only audit logger with minimal metadata."""
 
@@ -35,8 +39,10 @@ class AuditLogger:
             os.close(fd)
 
     def _write(self, line: str) -> None:
-        """Append a single line to the audit log."""
+        """Append a single line to the audit log. Drops writes if log exceeds 10MB."""
         try:
+            if self.log_path.exists() and self.log_path.stat().st_size > MAX_AUDIT_BYTES:
+                return  # Log full — silently drop. User should rotate.
             with open(self.log_path, "a") as f:
                 f.write(line + "\n")
         except OSError:

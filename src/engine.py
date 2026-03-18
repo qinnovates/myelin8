@@ -228,16 +228,20 @@ class TieringEngine:
         for p in paths:
             if not p.exists() or p.name.endswith(".age"):
                 continue
+            # Verify metadata exists before encrypting — if not tracked,
+            # encrypting would orphan the file (original deleted, no registry entry)
+            meta = self.metadata.get(p)
+            if not meta:
+                continue
             try:
                 encrypted = encrypt_file(p, self.config.encryption,
                                          remove_original=True)
-                meta = self.metadata.get(p)
-                if meta:
-                    meta.encrypted = True
-                    meta.compressed_path = str(encrypted)
-                    self.metadata._dirty = True
+                meta.encrypted = True
+                meta.compressed_path = str(encrypted)
+                self.metadata._dirty = True
             except (OSError, EncryptionError):
-                pass  # Skip files that fail — don't break the scan
+                self._log("error", operation="hot-encrypt",
+                          short_hash=meta.sha256[:6] if meta.sha256 else "")
         self.metadata.save()
 
     def evaluate_and_tier(self) -> list[TierAction]:
@@ -380,7 +384,13 @@ class TieringEngine:
             from .encryption import decrypt_file
             working_path = decrypt_file(compressed, self.config.encryption)
 
-        raw_path = decompress_file(working_path, remove_compressed=True)
+        try:
+            raw_path = decompress_file(working_path, remove_compressed=True)
+        except (OSError, zstd.ZstdError):
+            # Clean up decrypted intermediate on failure
+            if working_path != compressed and working_path.exists():
+                working_path.unlink()
+            raise
 
         # Run cold pipeline on raw content
         cold_output = raw_path.with_suffix(raw_path.suffix + ".cold.zst")
@@ -465,7 +475,9 @@ class TieringEngine:
         frozen_output = raw_path.with_suffix(".frozen")
         try:
             result = self.pipeline.compress_frozen(raw_path, frozen_output)
-        except (OSError, zstd.ZstdError):
+        except Exception:
+            # Broad catch: compress_frozen can raise ImportError (pyarrow),
+            # ValueError, or any pipeline error. Clean up plaintext.
             if raw_path.exists():
                 raw_path.unlink()
             raise

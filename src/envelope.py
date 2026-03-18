@@ -520,6 +520,7 @@ class EnvelopeEncryptor:
                 )
                 with os.fdopen(tmp_fd, "w") as f:
                     f.write(header.to_json())
+                os.chmod(tmp_str, 0o600)
                 Path(tmp_str).rename(header_file)
 
                 count += 1

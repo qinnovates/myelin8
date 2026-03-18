@@ -506,10 +506,11 @@ class CompressionPipeline:
         compressed = compressor.compress(processed)
         stages.append("zstd-3")
 
-        # Atomic write
+        # Atomic write with restricted permissions
         fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
         with os.fdopen(fd, "wb") as f:
             f.write(compressed)
+        os.chmod(tmp, 0o600)
         Path(tmp).rename(output_path)
 
         return PipelineResult(
@@ -545,6 +546,7 @@ class CompressionPipeline:
         fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
         with os.fdopen(fd, "wb") as f:
             f.write(compressed)
+        os.chmod(tmp, 0o600)
         Path(tmp).rename(output_path)
 
         return PipelineResult(
@@ -615,6 +617,7 @@ class CompressionPipeline:
             fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
             with os.fdopen(fd, "wb") as f:
                 f.write(compressed)
+            os.chmod(tmp, 0o600)
             Path(tmp).rename(output_path)
 
             return PipelineResult(
