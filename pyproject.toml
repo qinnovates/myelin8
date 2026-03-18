@@ -9,12 +9,17 @@ description = "AI-agnostic tiered memory compression with optional post-quantum 
 requires-python = ">=3.10"
 dependencies = [
     "zstandard>=0.19.0",
+    "pyarrow>=14.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+]
+# Minimal install without Parquet (frozen tier falls back to dict-zstd-19)
+minimal = [
+    "zstandard>=0.19.0",
 ]
 
 [project.scripts]
