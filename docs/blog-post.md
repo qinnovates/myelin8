@@ -82,7 +82,11 @@ This matters more as memory systems get more capable. More memory means more dat
 
 I see this with tools like OpenClaw and other open-source memory extensions. They expand context aggressively, which is useful. But they store everything unencrypted. On a shared server, a stolen laptop, or a compromised backup, that's every session you've ever had, readable in seconds.
 
-Engram runs entirely on your local machine. No data is sent to any server, API, or cloud service. There is no telemetry. Your memories never leave your filesystem. The encryption is optional but designed for this threat model:
+Engram runs entirely on your local machine. No data is sent to any server. No telemetry. Your memories never leave your filesystem unless you choose to move them.
+
+And that's the key difference: you choose the architecture. Keep everything local with Keychain encryption. Offload frozen archives to a NAS or S3. Share a compressed index across team machines. The encryption travels with the data. Even if you move cold-tier archives to cheaper storage elsewhere, an attacker who intercepts them gets PQ-encrypted blobs with per-artifact keys they can't unwrap.
+
+The encryption is optional but designed for this threat model:
 
 - Every artifact gets its own unique 256-bit encryption key (DEK)
 - Each tier has independent keypairs (compromising warm doesn't expose cold)

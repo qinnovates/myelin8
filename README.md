@@ -1,10 +1,22 @@
 # Engram
 
-An AI-agnostic plugin that increases your assistant's effective context window through automatic tiered compression of memory artifacts, with optional post-quantum encryption.
+Give your AI agents long-term memory that scales, compresses, and protects itself.
 
-Every AI assistant session generates artifacts: conversation logs, memory files, task caches, subagent outputs. These pile up fast. A 128K token context window fills in a few sessions. Older memories get dropped. Your assistant forgets things you told it last week.
+Every other memory solution dumps raw files on disk and hopes for the best. Context windows fill up. Old sessions disappear. Nothing is encrypted. If someone gets on your machine, every conversation you've ever had with your AI is readable in seconds.
 
-engram solves this the same way your brain does.
+Engram is different. It's the plumbing layer that lets your agents work with months or years of accumulated context without eating your disk alive, while protecting that context like it matters. Because it does.
+
+**Everything stays local. Nothing is sent to any server, API, or third party. Zero telemetry. Your memories never leave your machine.** But if you choose to offload memory to a separate server, NAS, or cloud archive, the encryption travels with it. You choose the architecture. The plumbing is here.
+
+## Why this exists
+
+Your brain doesn't keep every memory at the same resolution. It tiers them. Recent things are vivid and fast. Older things compress into patterns and summaries. Deep memories take effort and the right cue to retrieve. This isn't a limitation. It's what makes the system scale.
+
+AI memory tools today don't do this. They treat a session from 5 minutes ago the same as one from 6 months ago. Everything uncompressed, everything unencrypted, everything competing for the same context window. That doesn't scale.
+
+Engram applies the same tiered architecture that Splunk, Elasticsearch, and cloud datalakes use at petabyte scale. But we're not bound by biological constraints. The brain has working memory and long-term. We have four tiers with dramatically different compression strategies, a semantic index that searches all of them without decompressing anything, and post-quantum encryption that protects your data even if an attacker captures it today and waits for quantum computers.
+
+The result: your agents get access to months of context in the same token budget that used to hold a few sessions. Your disk footprint shrinks instead of growing. And your sessions, decisions, code reviews, and private conversations are encrypted with keys that only you control.
 
 ---
 
@@ -513,21 +525,29 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+## Your data, your infrastructure, your rules
+
+Engram processes everything locally. No data leaves your machine. No telemetry, no analytics, no cloud dependency. Your memories stay on your filesystem unless you decide otherwise.
+
+That's a deliberate design choice. Most memory tools are tightly coupled to a single AI platform and assume everything lives on one machine. Engram gives you the plumbing. You choose the architecture:
+
+- **Local-only:** Everything on your laptop. Keychain + Touch ID for encryption. Simplest setup.
+- **NAS/server offload:** Point scan targets or compressed archives at a mounted volume. Encryption travels with the files. Move cold/frozen tiers to cheaper storage.
+- **Multi-machine:** Share the semantic index across devices. Each machine compresses and encrypts locally. Cold/frozen archives sync via rsync, Syncthing, or cloud storage. Private keys stay on each machine's Keychain.
+- **Team server:** Shared `~/.claude/` on a dev server. Engram compresses everyone's sessions. Per-user encryption keys so team members can't read each other's cold-tier data.
+
+The encryption protects you in all of these scenarios. If an attacker gets on your system, they see compressed + encrypted blobs with per-artifact keys. If you offload frozen archives to S3 or a NAS, the PQ encryption means even a "harvest now, decrypt later" adversary can't read them. The key never leaves your Keychain/Vault. The data goes wherever you put it.
+
 ## Disclaimer
 
-**This software handles your data locally. Nothing leaves your machine.** Engram compresses and optionally encrypts AI session logs, memory files, and conversation history. All processing happens on your local filesystem. No data is sent to any server, API, cloud service, or third party. There is no telemetry, no analytics, no phone-home. Your memories stay yours.
+This software is provided as-is under the MIT license with no warranty. It has been security-reviewed (4 rounds, 3 independent red-team personas), but you should:
 
-While it has been security-reviewed (4 rounds, 3 independent red-team personas), it is provided as-is under the MIT license with no warranty.
+- Run `engram run --dry-run` first to preview changes
+- Keep backups of `~/.claude/` before first run
+- Test key recovery (`engram recall`) before relying on encryption for critical data
+- Know that boilerplate stripping stores extracted content in `~/.engram/boilerplate/` — if that directory is deleted, stripped content is lost (but can be re-extracted from the original if it still exists)
 
-**Before using in production:**
-- Run `engram run --dry-run` first to preview changes without modifying files
-- Keep backups of your `~/.claude/` directory before first run
-- If using encryption, test key recovery (`engram recall`) before relying on it for critical data
-- The compression pipeline is lossy in one direction only: boilerplate stripping removes repeated system prompts and stores them separately. Full content is reconstructable via `engram recall`, but if the boilerplate store (`~/.engram/boilerplate/`) is deleted, stripped content is lost
-
-**Encryption is not a substitute for access control.** Engram's PQ encryption protects data at rest. It does not protect against a compromised process with memory access, a malicious plugin running in the same session, or an attacker who has your private key.
-
-**Post-quantum claims are scoped.** ML-KEM-768 (FIPS 203) is NIST-standardized and used by OpenSSH 10.0. The `age` tool's PQ hybrid implementation is described by its author as production-ready but has not received a published independent audit specific to the PQ integration. The classical X25519 + ChaCha20-Poly1305 layer has been audited by Cure53.
+**Encryption scope:** PQ encryption (ML-KEM-768, FIPS 203) protects data at rest. It does not protect against a compromised process with memory access or an attacker who has your private key. The `age` tool's PQ hybrid is described by its author as production-ready; the classical X25519 + ChaCha20-Poly1305 layer was audited by Cure53.
 
 ## AI Disclosure
 
