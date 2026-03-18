@@ -28,13 +28,41 @@ from .encryption import encrypt_file, decrypt_file, ENCRYPTED_EXT
 from .context import SemanticIndex, ContextBuilder, ContextBudget, DEFAULT_CONTEXT_BUDGET_CHARS
 
 
-class IntegrityError(Exception):
+class EngineError(Exception):
+    """Base exception for all engine errors."""
+    pass
+
+
+class IntegrityError(EngineError):
     """Raised when SHA-256 verification fails on recall or compression."""
     pass
 
 
-class PathContainmentError(Exception):
+class PathContainmentError(EngineError):
     """Raised when a path escapes allowed directories."""
+    pass
+
+
+class RecallError(EngineError):
+    """Raised when an artifact cannot be recalled from a compressed tier."""
+    def __init__(self, message: str, tier: str = "", path: str = ""):
+        self.tier = tier
+        self.artifact_path = path
+        super().__init__(message)
+
+
+class ArtifactNotFoundError(RecallError):
+    """The compressed artifact file is missing from disk."""
+    pass
+
+
+class DecompressionError(RecallError):
+    """Decompression failed (corrupted zst, missing dictionary, bad Parquet)."""
+    pass
+
+
+class DecryptionRequiredError(RecallError):
+    """Artifact is encrypted but no key source is configured or accessible."""
     pass
 
 
@@ -361,26 +389,62 @@ class TieringEngine:
             )
 
         meta = self.metadata.get(original_path)
-        if not meta or meta.tier == Tier.HOT.value:
+        if not meta:
+            raise ArtifactNotFoundError(
+                f"No record of this artifact in the registry: {original_path}",
+                tier="unknown", path=str(original_path),
+            )
+
+        if meta.tier == Tier.HOT.value:
             return original_path if original_path.exists() else None
 
         # Validate compressed_path from registry
         if not meta.compressed_path:
-            return None
+            raise ArtifactNotFoundError(
+                f"Artifact is in {meta.tier} tier but has no compressed path: {original_path}",
+                tier=meta.tier, path=str(original_path),
+            )
         compressed = _validate_registry_path(
             meta.compressed_path, self.config, "compressed_path"
         )
         if not compressed.exists():
-            return None
+            raise ArtifactNotFoundError(
+                f"Compressed file missing from disk: {meta.compressed_path} "
+                f"(artifact was in {meta.tier} tier)",
+                tier=meta.tier, path=str(original_path),
+            )
 
         working_path = compressed
 
         # Decrypt if needed
-        if meta.encrypted and self.config.encryption.enabled:
-            working_path = decrypt_file(compressed, self.config.encryption)
+        if meta.encrypted:
+            if not self.config.encryption.enabled:
+                raise DecryptionRequiredError(
+                    f"Artifact in {meta.tier} tier is encrypted but encryption is not "
+                    f"configured. Enable encryption in config and provide the {meta.tier} "
+                    f"tier private key to recall this artifact.",
+                    tier=meta.tier, path=str(original_path),
+                )
+            try:
+                working_path = decrypt_file(compressed, self.config.encryption)
+            except Exception as e:
+                raise DecryptionRequiredError(
+                    f"Failed to decrypt {meta.tier}-tier artifact: {original_path}. "
+                    f"Check that the correct private key is accessible. "
+                    f"For Keychain: ensure Touch ID is available. "
+                    f"For Vault/KMS: ensure credentials are valid. Error: {e}",
+                    tier=meta.tier, path=str(original_path),
+                ) from e
 
         # Decompress
-        output = decompress_file(working_path, output_path=original_path)
+        try:
+            output = decompress_file(working_path, output_path=original_path)
+        except Exception as e:
+            raise DecompressionError(
+                f"Failed to decompress {meta.tier}-tier artifact: {original_path}. "
+                f"The compressed file may be corrupted. Error: {e}",
+                tier=meta.tier, path=str(original_path),
+            ) from e
 
         # Verify integrity after decompression
         if meta.sha256:

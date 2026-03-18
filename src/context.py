@@ -57,15 +57,28 @@ class ArtifactSummary:
     def idle_days(self) -> float:
         return (time.time() - self.last_accessed) / 86400
 
+    @property
+    def recall_hint(self) -> str:
+        """Human-readable hint about what recall from this tier involves."""
+        hints = {
+            "hot": "instant access",
+            "warm": "quick recall (~10ms, light decompression)",
+            "cold": "slower recall (~500ms, dictionary decompression, may need encryption key)",
+            "frozen": "slowest recall (~5-10s, Parquet restoration, may need encryption key)",
+        }
+        return hints.get(self.tier, "unknown tier")
+
     def to_context_line(self) -> str:
         """Single-line representation for context injection."""
-        tier_icon = {"hot": "●", "warm": "◐", "cold": "○"}.get(self.tier, "?")
+        tier_icon = {"hot": "●", "warm": "◐", "cold": "○", "frozen": "◌"}.get(self.tier, "?")
         age = f"{self.age_days:.0f}d"
         return f"{tier_icon} [{self.tier}] {self.path} ({self.char_count} chars, {age} old) — {self.summary}"
 
     def to_context_block(self) -> str:
-        """Multi-line representation with keywords."""
+        """Multi-line representation with keywords and recall hint."""
         lines = [self.to_context_line()]
+        if self.tier in ("cold", "frozen"):
+            lines.append(f"  ⏱ Recall: {self.recall_hint}")
         if self.keywords:
             lines.append(f"  Keywords: {', '.join(self.keywords[:10])}")
         return "\n".join(lines)
@@ -488,12 +501,26 @@ class ContextBuilder:
                     break
                 sections.append(line)
 
-        # Footer with budget stats
+        # Footer with budget stats and tier access guide
+        cold_count = sum(1 for e in self.index.all_entries() if e.tier == "cold")
+        frozen_count = sum(1 for e in self.index.all_entries() if e.tier == "frozen")
+
+        tier_note = ""
+        if cold_count > 0 or frozen_count > 0:
+            tier_note = (
+                f"\n**Archived memories:** {cold_count} cold, {frozen_count} frozen. "
+                f"These are indexed above (searchable by keyword) but compressed on disk. "
+                f"To access full content, use `engram recall <path>`. "
+                f"Cold recall takes ~500ms. Frozen recall takes ~5-10s. "
+                f"If encryption is enabled, Touch ID or vault access may be required.\n"
+            )
+
         footer = (
             f"\n---\n"
             f"Memory: {self.budget.utilization_pct}% of context budget used "
             f"(~{self.budget.remaining_tokens_approx:,} tokens remaining). "
-            f"Use `recall <path>` for full content.\n"
+            f"Use `engram recall <path>` for full content."
+            f"{tier_note}\n"
         )
         self.budget.consume(footer)
         sections.append(footer)
