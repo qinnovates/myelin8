@@ -480,7 +480,7 @@ engram/
 | Component | Inspired By | What It Does |
 |-----------|-------------|--------------|
 | 4-tier transitions | Splunk SmartStore + S3 Intelligent-Tiering | Age + idle time trigger progressive compression |
-| Compression | Splunk 7.2+ / ELK 8.17+ / Iceberg 1.4+ default | zstd at 4 levels (3, 9, 19) |
+| Compression | Splunk 7.2+ / ELK 8.17+ (best_compression) / Iceberg 1.4+ default | zstd at 4 levels (3, 9, 19) |
 | Semantic index | Elasticsearch inverted index | Keyword search without decompressing |
 | Progressive recall | ELK frozen-tier partially mounted snapshots | Summary → full content on demand |
 | Envelope encryption | AWS KMS / Google Tink | Per-artifact DEK, asymmetric PQ key wrap |
