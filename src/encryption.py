@@ -49,7 +49,7 @@ class AgeNotFoundError(EncryptionError):
     pass
 
 
-def _validate_recipient(pubkey: str) -> None:
+def validate_recipient(pubkey: str) -> None:
     """Validate recipient public key format to prevent argument injection."""
     if not (AGE_NATIVE_KEY_RE.match(pubkey) or SSH_PUBKEY_RE.match(pubkey)):
         raise EncryptionError(
@@ -147,7 +147,7 @@ def encrypt_file(
     cmd = ["age"]
 
     if config.recipient_pubkey:
-        _validate_recipient(config.recipient_pubkey)
+        validate_recipient(config.recipient_pubkey)
         cmd.extend(["-r", config.recipient_pubkey])
     else:
         # Passphrase mode (requires user interaction — not recommended for automation)

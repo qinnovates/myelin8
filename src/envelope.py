@@ -55,11 +55,11 @@ import secrets
 import subprocess
 import shutil
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
 
-from .encryption import EncryptionError, check_age_installed, _validate_recipient
+from .encryption import EncryptionError, check_age_installed, validate_recipient
 
 
 # --- Constants ---
@@ -97,16 +97,11 @@ class AsymmetricKeyConfig:
     Private keys live wherever the user's security posture requires.
     """
     enabled: bool = False
-    warm: TierKeyPair = None  # type: ignore[assignment]
-    cold: TierKeyPair = None  # type: ignore[assignment]
+    warm: TierKeyPair = field(default_factory=TierKeyPair)
+    cold: TierKeyPair = field(default_factory=TierKeyPair)
     # Key generation counter (incremented on rotation)
     key_generation: int = 1
 
-    def __post_init__(self) -> None:
-        if self.warm is None:
-            self.warm = TierKeyPair()
-        if self.cold is None:
-            self.cold = TierKeyPair()
 
     def get_tier_keys(self, tier: str) -> TierKeyPair:
         if tier == "warm":
@@ -260,7 +255,7 @@ def encrypt_dek_with_pubkey(dek: bytes, pubkey: str) -> bytes:
         age ciphertext bytes containing the encrypted DEK.
     """
     _check_age_cached()
-    _validate_recipient(pubkey)
+    validate_recipient(pubkey)
 
     # Pipe DEK via stdin — never touches disk (CRITICAL: fixes temp file race)
     result = subprocess.run(

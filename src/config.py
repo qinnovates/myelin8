@@ -283,18 +283,6 @@ class EngineConfig:
             ),
         ]
 
-    @classmethod
-    def default_generic_targets(cls) -> list[ScanTarget]:
-        """Default targets for generic AI assistant artifacts."""
-        home = str(Path.home())
-        return [
-            ScanTarget(
-                path=f"{home}/.local/share/ai-memory",
-                pattern="*",
-                description="Generic AI memory store"
-            ),
-        ]
-
     def validate(self) -> None:
         """Run all config validations. Called after loading."""
         self._validate_metadata_dir()

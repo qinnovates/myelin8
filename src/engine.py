@@ -24,10 +24,10 @@ from pathlib import Path
 import zstandard as zstd
 from typing import Optional
 
-from .config import EngineConfig, COMPRESSED_EXT
+from .config import EngineConfig
 from .metadata import MetadataStore, Tier, ArtifactMeta, compute_sha256
 from .compressor import compress_file, decompress_file, recompress_file
-from .encryption import encrypt_file, decrypt_file, ENCRYPTED_EXT, EncryptionError
+from .encryption import encrypt_file, decrypt_file, EncryptionError
 from .context import SemanticIndex, ContextBuilder, ContextBudget, DEFAULT_CONTEXT_BUDGET_CHARS
 
 
@@ -154,44 +154,12 @@ class TieringEngine:
     def scan(self) -> list[Path]:
         """
         Discover all artifacts across configured scan targets.
-        Skips symlinks, compressed files, and encrypted files.
-        Returns list of discovered file paths.
+
+        Delegates to scanner.iter_artifacts() for the actual filesystem
+        walk. Single implementation of scan logic (SME F3.5 fix).
         """
-        discovered: list[Path] = []
-
-        for target in self.config.scan_targets:
-            base = target.resolve()
-            if not base.exists():
-                continue
-
-            base_resolved = base.resolve()
-
-            if target.recursive:
-                pattern = f"**/{target.pattern}"
-            else:
-                pattern = target.pattern
-
-            for match in base.glob(pattern):
-                # Skip symlinks — prevents cross-directory reads (P0 fix)
-                if match.is_symlink():
-                    continue
-
-                if not match.is_file():
-                    continue
-
-                # Verify resolved path stays within scan target root
-                try:
-                    match.resolve().relative_to(base_resolved)
-                except ValueError:
-                    continue  # Escaped scan root — skip
-
-                # Skip already-compressed or encrypted files
-                if match.name.endswith(COMPRESSED_EXT) or match.name.endswith(ENCRYPTED_EXT):
-                    continue
-
-                discovered.append(match)
-
-        return discovered
+        from .scanner import iter_artifacts
+        return list(iter_artifacts(self.config.scan_targets))
 
     def register_all(self, paths: list[Path]) -> None:
         """Register all discovered files in the metadata store and semantic index.
@@ -247,6 +215,17 @@ class TieringEngine:
 
         for meta in cold_candidates:
             action = self._tier_to_cold(meta)
+            if action:
+                actions.append(action)
+
+        # Phase 3: COLD -> FROZEN (recompress at highest level)
+        frozen_candidates = self.metadata.candidates_for_frozen(
+            age_hours=policy.cold_to_frozen_age_hours,
+            idle_hours=policy.cold_to_frozen_idle_hours,
+        )
+
+        for meta in frozen_candidates:
+            action = self._tier_to_frozen(meta)
             if action:
                 actions.append(action)
 
@@ -389,6 +368,80 @@ class TieringEngine:
         )
         self.index.update_tier(Path(meta.path), Tier.COLD.value)
         self._log("tier", from_tier="warm", to_tier="cold",
+                  artifact_hash=meta.sha256 or "", ratio=result.ratio)
+
+        return action
+
+    def _tier_to_frozen(self, meta: ArtifactMeta) -> Optional[TierAction]:
+        """Recompress a cold artifact to frozen tier (highest compression)."""
+        compressed = Path(meta.compressed_path) if meta.compressed_path else None
+        if not compressed or not compressed.exists():
+            return None
+
+        action = TierAction(
+            path=meta.path,
+            from_tier=Tier.COLD.value,
+            to_tier=Tier.FROZEN.value,
+            original_size=meta.original_size,
+            dry_run=self.config.dry_run,
+        )
+
+        if self.config.dry_run:
+            return action
+
+        # Same flow as cold but with frozen compression level
+        working_path = compressed
+        was_encrypted = meta.encrypted
+
+        if was_encrypted and self.config.encryption.enabled:
+            try:
+                working_path = decrypt_file(compressed, self.config.encryption)
+                compressed.unlink()
+            except (OSError, subprocess.SubprocessError, EncryptionError) as e:
+                raise DecryptionRequiredError(
+                    f"Failed to decrypt cold-tier artifact for frozen transition: {e}",
+                    tier=Tier.COLD.value, path=meta.path,
+                ) from e
+
+        try:
+            result = recompress_file(
+                working_path,
+                new_level=self.config.tier_policy.frozen_compression_level,
+            )
+        except (OSError, zstd.ZstdError):
+            if working_path != compressed and working_path.exists():
+                working_path.unlink()
+            raise
+
+        final_path = result.output_path
+
+        # Re-encrypt if enabled
+        encrypted = False
+        if self.config.encryption.enabled and self.config.encryption.recipient_pubkey:
+            try:
+                encrypted_path = encrypt_file(final_path, self.config.encryption)
+                final_path.unlink()
+                final_path = encrypted_path
+                encrypted = True
+            except (OSError, subprocess.SubprocessError, EncryptionError):
+                enc_candidate = final_path.with_suffix(final_path.suffix + ".age")
+                if enc_candidate.exists():
+                    enc_candidate.unlink()
+                raise
+
+        action.new_size = final_path.stat().st_size
+        action.ratio = result.ratio
+        action.encrypted = encrypted
+
+        self.metadata.update_tier(
+            Path(meta.path), Tier.FROZEN,
+            compressed_path=str(final_path),
+            compressed_size=action.new_size,
+            ratio=result.ratio,
+            encrypted=encrypted,
+        )
+        self.index.update_tier(Path(meta.path), Tier.FROZEN.value)
+        self._log("tier", from_tier="cold", to_tier="frozen",
                   artifact_hash=meta.sha256 or "", ratio=result.ratio)
 
         return action

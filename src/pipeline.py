@@ -159,7 +159,6 @@ def strip_boilerplate(content: bytes, boilerplate_store: Path) -> bytes:
         Content with boilerplate replaced by BOILERPLATE_REF lines.
     """
     boilerplate_store.mkdir(parents=True, exist_ok=True)
-    result = content
 
     # Process JSONL: check each line's "content" field for boilerplate
     lines = content.split(b"\n")
