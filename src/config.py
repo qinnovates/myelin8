@@ -2,9 +2,10 @@
 Configuration schema and defaults for engram.
 
 Tier model (inspired by Splunk SmartStore + Elasticsearch ILM):
-  HOT  -> no compression, immediate access
-  WARM -> zstd level 3 (~3.2x ratio, ~234 MB/s compress)
-  COLD -> zstd level 9 (~3.5x ratio, ~40 MB/s compress, slowest recall)
+  HOT    -> no compression, immediate access
+  WARM   -> minify + zstd-3 (4-5x ratio)
+  COLD   -> boilerplate strip + dict-trained zstd-9 (8-12x ratio)
+  FROZEN -> columnar Parquet + dict + zstd-19 (20-50x ratio)
 
 Transition triggers are age-based (primary) + access-recency (secondary),
 matching production patterns from Splunk LRU and S3 Intelligent-Tiering.

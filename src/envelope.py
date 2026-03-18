@@ -78,7 +78,7 @@ class TierKeyPair:
                  NEVER stored as a plaintext file.
 
     Private key sources (most secure first):
-      keychain:<service>:<account>  — macOS Keychain (Touch ID / Secure Enclave on M-series)
+      keychain:<service>:<account>  — macOS Keychain (Touch ID gated on Apple Silicon, software keychain)
       command:<shell cmd>           — HashiCorp Vault, AWS KMS, Azure KV, GCP KMS
       env:<VAR_NAME>                — Environment variable (CI/CD only)
 
@@ -152,10 +152,12 @@ def _resolve_private_key(source: str) -> str:
     Retrieve private key material from the configured source.
 
     Supported source formats:
-      file:/path/to/key.txt         — read from file
       keychain:service:account      — macOS Keychain lookup
       env:VAR_NAME                  — environment variable
       command:vault kv get ...      — shell command stdout
+
+    NOT supported:
+      file: — blocked. Private keys must not be plaintext on disk.
 
     Returns:
         Raw private key string (AGE-SECRET-KEY-... or similar).
@@ -223,7 +225,7 @@ def _resolve_private_key(source: str) -> str:
     else:
         raise EncryptionError(
             f"Unknown private key source format: {source}. "
-            f"Use file:, keychain:, env:, or command:"
+            f"Use keychain:, env:, or command:"
         )
 
 
@@ -586,7 +588,10 @@ class EnvelopeEncryptor:
         Store a private key in macOS Keychain.
 
         On Apple Silicon (M-series), Keychain items can be protected by
-        the Secure Enclave and require Touch ID or device passcode to access.
+        the user's login password and Touch ID prompt if configured.
+        Note: age/X25519 keys cannot be stored in the Secure Enclave
+        (it only supports P-256). Keys are in the software keychain
+        and are extractable by same-UID processes.
         This means the private key is hardware-bound — it cannot be extracted
         even with root access.
 

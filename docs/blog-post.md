@@ -95,7 +95,7 @@ Your keys live in Keychain or Vault. Never as files. If you lose the key, data i
 
 Install Engram, run the guided setup, and preview what would be compressed. The dry run scans your disk and shows you the file count, total size, and what would move to each tier. No files are modified until you explicitly choose to run it.
 
-72 tests. 7 rounds of security review.
+116 tests. 8 rounds of security review.
 
 Dig deeper:
 - [How the compression pipeline works](https://github.com/qinnovates/engram#compression-pipeline)

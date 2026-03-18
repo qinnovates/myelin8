@@ -363,7 +363,7 @@ When encryption is enabled, **everything** is encrypted:
 | Boilerplate store (prompt fragments) | Yes | Bundled into `boilerplate.tar.age` on lock |
 | Audit log | Yes | Part of index bundle |
 | Compression dictionary | Yes | Part of index bundle |
-| Config file | No — contains only public keys (safe) | 0600 permissions |
+| Config file | No — contains public keys and key source identifiers (service/account names). Not secret but treat as sensitive metadata. | 0600 permissions |
 
 ### Index Encryption
 

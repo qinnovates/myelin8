@@ -236,7 +236,7 @@ See the full [security recommendations](#security-recommendations) section for t
 
 **Solo dev:** 6 months of sessions → compressed from 200 MB to 15 MB. Search past decisions without re-explaining.
 
-**Security researcher:** Sessions contain exploits and disclosure timelines. PQ envelope encryption. Touch ID on recall. Private keys in Secure Enclave-backed Keychain.
+**Security researcher:** Sessions contain exploits and disclosure timelines. PQ envelope encryption. Touch ID on recall. Private keys in Keychain-backed Keychain.
 
 **Team server:** Shared `~/.claude/`. Per-user encryption keys. Semantic index lets everyone search. Content isolation via per-tier keypairs.
 
@@ -293,7 +293,7 @@ Setup modes: `engram init` (guided), `--mode interactive` (pick locations), `--m
 - `zstandard` >= 0.19.0 (auto-installed)
 - `pyarrow` >= 14.0.0 (auto-installed, for frozen Parquet tier)
 - `age` >= 1.3.0 (optional, for PQ encryption) — `brew install age`
-- Rust toolchain (optional, to build the crypto sidecar) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- Rust toolchain (optional, to build the crypto sidecar) — `brew install rust` (macOS) or see [rustup.rs](https://rustup.rs)
 
 ---
 
