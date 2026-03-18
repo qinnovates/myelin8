@@ -60,9 +60,9 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
     print(f"Discovered {len(discovered)} artifacts:")
     for p in discovered:
-        size = p.stat().st_size
-        age_h = (time.time() - p.stat().st_ctime) / 3600
-        print(f"  {p}  ({size:,} bytes, {age_h:.1f}h old)")
+        s = p.stat()
+        age_h = (time.time() - s.st_ctime) / 3600
+        print(f"  {p}  ({s.st_size:,} bytes, {age_h:.1f}h old)")
 
 
 def cmd_run(args: argparse.Namespace) -> None:

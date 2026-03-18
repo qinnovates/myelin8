@@ -138,6 +138,17 @@ class TieringEngine:
         self.index = SemanticIndex(meta_dir)
         self.actions: list[TierAction] = []
 
+        # Audit logging — disabled by default, opt-in via config
+        self._audit = None
+        if config.audit_log:
+            from .audit import AuditLogger
+            self._audit = AuditLogger(meta_dir)
+
+    def _log(self, method: str, **kwargs) -> None:
+        """Log an event if audit logging is enabled."""
+        if self._audit:
+            getattr(self._audit, method)(**kwargs)
+
     def scan(self) -> list[Path]:
         """
         Discover all artifacts across configured scan targets.
@@ -305,6 +316,8 @@ class TieringEngine:
             encrypted=encrypted,
         )
         self.index.update_tier(src, Tier.WARM.value)
+        self._log("tier", from_tier="hot", to_tier="warm",
+                  artifact_hash=meta.sha256 or "", ratio=result.ratio)
 
         return action
 
@@ -373,6 +386,8 @@ class TieringEngine:
             encrypted=encrypted,
         )
         self.index.update_tier(Path(meta.path), Tier.COLD.value)
+        self._log("tier", from_tier="warm", to_tier="cold",
+                  artifact_hash=meta.sha256 or "", ratio=result.ratio)
 
         return action
 
@@ -482,6 +497,7 @@ class TieringEngine:
         )
         self.metadata.touch(original_path)
         self.index.update_tier(original_path, Tier.HOT.value)
+        self._log("recall", tier=meta.tier, artifact_hash=meta.sha256 or "")
         self.metadata.save()
         self.index.save()
 
@@ -528,8 +544,7 @@ class TieringEngine:
     def status(self) -> dict:
         """Return current tier distribution, compression stats, and index stats."""
         stats = self.metadata.stats()
-        stats["indexed_artifacts"] = len(self.index.all_entries())
-        stats["total_keywords"] = sum(
-            len(e.keywords) for e in self.index.all_entries()
-        )
+        entries = self.index.all_entries()
+        stats["indexed_artifacts"] = len(entries)
+        stats["total_keywords"] = sum(len(e.keywords) for e in entries)
         return stats

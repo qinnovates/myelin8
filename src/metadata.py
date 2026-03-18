@@ -15,7 +15,6 @@ Splunk's cache manager tracks bucket access with LRU timestamps.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from dataclasses import dataclass, asdict
@@ -96,13 +95,8 @@ class MetadataStore:
             "artifact_count": len(self._artifacts),
             "artifacts": {k: asdict(v) for k, v in self._artifacts.items()},
         }
-        # Atomic write with restricted permissions (0600)
-        import os
-        tmp = self.db_path.with_suffix(".tmp")
-        fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(payload, f, indent=2)
-        tmp.rename(self.db_path)
+        from .fileutil import atomic_write_text
+        atomic_write_text(self.db_path, json.dumps(payload, indent=2))
         self._dirty = False
 
     def register(self, path: Path) -> ArtifactMeta:
@@ -209,37 +203,39 @@ class MetadataStore:
         ]
 
     def stats(self) -> dict:
-        """Return summary statistics."""
-        hot = self.by_tier(Tier.HOT)
-        warm = self.by_tier(Tier.WARM)
-        cold = self.by_tier(Tier.COLD)
-        frozen = self.by_tier(Tier.FROZEN)
+        """Return summary statistics in a single pass over artifacts."""
+        counts: dict[str, int] = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0}
+        total_original = 0
+        total_compressed = 0
+        total_hot_bytes = 0
 
-        total_original = sum(a.original_size for a in self._artifacts.values())
-        total_compressed = sum(
-            a.compressed_size for a in self._artifacts.values()
-            if a.compressed_size > 0
-        )
-        total_hot_size = sum(a.original_size for a in hot)
+        for a in self._artifacts.values():
+            counts[a.tier] = counts.get(a.tier, 0) + 1
+            total_original += a.original_size
+            if a.compressed_size > 0:
+                total_compressed += a.compressed_size
+            if a.tier == Tier.HOT.value:
+                total_hot_bytes += a.original_size
 
         return {
             "total_artifacts": len(self._artifacts),
-            "hot_count": len(hot),
-            "warm_count": len(warm),
-            "cold_count": len(cold),
-            "frozen_count": len(frozen),
+            "hot_count": counts.get("hot", 0),
+            "warm_count": counts.get("warm", 0),
+            "cold_count": counts.get("cold", 0),
+            "frozen_count": counts.get("frozen", 0),
             "total_original_bytes": total_original,
             "total_compressed_bytes": total_compressed,
-            "total_hot_bytes": total_hot_size,
+            "total_hot_bytes": total_hot_bytes,
             "overall_ratio": round(total_original / total_compressed, 2) if total_compressed > 0 else 1.0,
-            "space_saved_bytes": total_original - total_compressed - total_hot_size if total_compressed > 0 else 0,
+            "space_saved_bytes": total_original - total_compressed - total_hot_bytes if total_compressed > 0 else 0,
         }
 
 
 def compute_sha256(filepath: Path) -> str:
-    """Compute SHA-256 hash of a file for integrity verification."""
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """Compute SHA-256 hash of a file for integrity verification.
+
+    Delegates to fileutil.compute_file_hash for the single canonical
+    implementation. This wrapper exists for backward compatibility.
+    """
+    from .fileutil import compute_file_hash
+    return compute_file_hash(filepath)

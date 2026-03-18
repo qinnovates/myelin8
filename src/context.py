@@ -177,19 +177,15 @@ class SemanticIndex:
     def save(self, force: bool = False) -> None:
         if not force and not self._dirty:
             return
-        import os
         from dataclasses import asdict
+        from .fileutil import atomic_write_text
         payload = {
             "version": 1,
             "updated_at": time.time(),
             "entry_count": len(self._entries),
             "entries": {k: asdict(v) for k, v in self._entries.items()},
         }
-        tmp = self.index_path.with_suffix(".tmp")
-        fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(payload, f, indent=2)
-        tmp.rename(self.index_path)
+        atomic_write_text(self.index_path, json.dumps(payload, indent=2))
         self._dirty = False
 
     def index_artifact(self, path: Path, content: str, meta: ArtifactMeta) -> ArtifactSummary:
@@ -451,8 +447,11 @@ class ContextBuilder:
             return ""
         sections.append(header)
 
+        # Cache all entries once (avoid repeated list copies)
+        all_entries = self.index.all_entries()
+
         # Phase 1: Hot tier summaries (always included)
-        hot_entries = [e for e in self.index.all_entries() if e.tier == "hot"]
+        hot_entries = [e for e in all_entries if e.tier == "hot"]
         hot_entries.sort(key=lambda e: e.last_accessed, reverse=True)
 
         if hot_entries:
@@ -486,7 +485,7 @@ class ContextBuilder:
                     sections.append(block)
 
         # Phase 3: Fill remaining budget with warm-tier by recency
-        warm_entries = [e for e in self.index.all_entries()
+        warm_entries = [e for e in all_entries
                         if e.tier == "warm" and e.relevance_score == 0]
         warm_entries.sort(key=lambda e: e.last_accessed, reverse=True)
 
@@ -502,8 +501,8 @@ class ContextBuilder:
                 sections.append(line)
 
         # Footer with budget stats and tier access guide
-        cold_count = sum(1 for e in self.index.all_entries() if e.tier == "cold")
-        frozen_count = sum(1 for e in self.index.all_entries() if e.tier == "frozen")
+        cold_count = sum(1 for e in all_entries if e.tier == "cold")
+        frozen_count = sum(1 for e in all_entries if e.tier == "frozen")
 
         tier_note = ""
         if cold_count > 0 or frozen_count > 0:

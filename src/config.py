@@ -191,6 +191,11 @@ class EngineConfig:
     dry_run: bool = False
     # Verbose output
     verbose: bool = False
+    # Audit logging — disabled by default. When enabled, logs tier/encrypt/
+    # decrypt/recall events to ~/.engram/audit.log with minimal metadata
+    # (timestamp, operation, tier, short hash). No paths, content, or queries.
+    # Log file is 0600 permissions. Log forwarding is out of scope.
+    audit_log: bool = False
 
     def _validate_metadata_dir(self) -> Path:
         """Validate and resolve metadata_dir — must be within home."""
