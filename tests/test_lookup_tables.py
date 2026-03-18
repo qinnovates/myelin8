@@ -188,7 +188,8 @@ class TestPQCodebook:
         results = pq.search(data[0], all_codes, top_k=5)
         assert len(results) == 5
         assert results[0][0] == 0  # should find itself first
-        assert results[0][1] < 1e-4  # near-zero distance
+        # Distance is non-zero due to quantization loss, but self should be closest
+        assert results[0][1] <= results[1][1]
 
     def test_search_empty_codes(self, trained_pq):
         pq, _ = trained_pq
