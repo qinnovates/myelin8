@@ -6,7 +6,11 @@
 
 AI context windows have a hard limit. Fill it up and the oldest memories fall off. Your assistant forgets what you told it last week.
 
-Engram solves this the way the brain does. Your brain doesn't hold everything in working memory. It tiers: recent experiences stay vivid (hot), recent days consolidate (warm), older memories compress into patterns (cold), deep memories take effort to surface (frozen). Each tier trades retrieval speed for storage efficiency.
+Engram solves this the way the brain does.
+
+Your brain doesn't hold everything in working memory at once. It uses a tiered architecture: the **prefrontal cortex** keeps ~7 items in active firing for immediate access (hot). The **hippocampus** consolidates recent experiences over hours and days, replaying them during sleep into longer-term storage (warm). The **neocortex** stores long-term memories distributed across cortical regions, reconstructed from fragments when the right cue triggers recall (cold). And the deepest memories — the ones you haven't accessed in months or years — take real effort and the right context to surface, like the tip-of-tongue phenomenon (frozen).
+
+Each tier trades retrieval speed for storage efficiency. That's not a limitation. It's what lets the system scale across decades.
 
 This isn't a new idea in AI. DeepSeek-V2 ([arXiv:2405.04434](https://arxiv.org/abs/2405.04434)) applied the same principle to attention itself: instead of recalculating full key/value tensors for every token, they precompute and cache compressed latent vectors — reducing KV cache by 93.3% and achieving 5.76x throughput. Same insight: don't recompute what you can store compressed and recall on demand.
 
