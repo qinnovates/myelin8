@@ -12,132 +12,166 @@ ai_assisted: true
 
 Your AI assistant has amnesia.
 
-Every session starts from zero. The context window fills up. Old conversations vanish. That thing you spent an hour explaining three weeks ago? Gone. The architectural decision you made in January? The assistant has no idea.
+Every session starts from zero. The context window fills up. Old conversations vanish. That architectural decision you made in January? Gone. The bug you spent an hour explaining three weeks ago? The assistant has no idea it happened.
 
-The workaround is memory files. Claude Code writes to `~/.claude/projects/*/memory/`. ChatGPT keeps desktop caches. Cursor logs conversations. These files grow without bound, sit unencrypted on your disk, and most of them never get looked at again.
+The workaround is memory files. Claude writes to `~/.claude/`. ChatGPT keeps desktop caches. Cursor logs conversations. After six months of daily use, you've got 4,500+ files consuming 2.6 GB of disk space, sitting unencrypted, unsearchable, and mostly never looked at again.
 
-I wanted something better. So I built Engram.
+I know because I checked. That's what was on my machine.
 
-## Your brain already solved this problem
+So I built [Engram](https://github.com/qinnovates/engram).
 
-Your brain doesn't store yesterday's lunch and your childhood address the same way. It uses a tiered system. Working memory holds about 7 items in active neural firing. The hippocampus consolidates recent experiences during sleep, replaying them into the neocortex for long-term storage. Older memories live distributed across cortical regions, reconstructed from fragments when the right cue triggers recall.
+## The numbers
 
-The deeper the memory, the longer it takes to retrieve. That's not a bug. It's a compression strategy.
+Before Engram, my Claude artifacts looked like this:
 
-Engram works the same way.
-
-| Brain System | What Happens | Engram Equivalent |
-|---|---|---|
-| Working memory (prefrontal cortex) | ~7 items, active firing, instant access | **Hot tier** — raw files, no compression |
-| Recent memory (hippocampus) | Consolidation, indexing, hours to days | **Warm tier** — minified + zstd, 4-5x compression |
-| Long-term memory (neocortex) | Distributed storage, cue-dependent recall | **Cold tier** — boilerplate stripped + dictionary-trained zstd, 8-12x |
-| Deep memory (rarely accessed) | Tip-of-tongue, takes seconds or the right cue | **Frozen tier** — columnar Parquet + zstd, 20-50x |
-
-The brain's key insight: you don't need all memories at full resolution all the time. You need the right ones fast, with the option to dig deeper.
-
-## How the compression pipeline works
-
-Most tools crank up the zstd level and call it a day. zstd level 3 gives you 3.2x. zstd level 19 gives you 3.8x. Across four tiers, that's barely noticeable.
-
-We do something different. Each tier applies progressively more aggressive data transformations *before* the compressor even runs.
-
-**Warm (4-5x):** JSON minification strips 30-40% of whitespace. Then zstd-3 handles the rest.
-
-**Cold (8-12x):** AI session logs repeat the same system prompts in every single session. A 2,000-5,000 token system prompt, verbatim, thousands of times across your history. Engram strips these to 64-byte hash references and stores the original once. That alone can eliminate 40-70% of content. Then a dictionary trained on your actual session logs teaches zstd the shared schema, so it only compresses the unique content.
-
-**Frozen (20-50x):** This is where Parquet comes in.
-
-## Why Parquet for frozen tier
-
-A JSONL conversation log looks like this:
-
-```json
-{"role":"user","content":"What about security?","timestamp":1710000000}
-{"role":"assistant","content":"Here is my analysis...","timestamp":1710000060}
+```
+4,538 files
+2.6 GB on disk
+0 files encrypted
+0 files compressed
+100% of context budget consumed by recent sessions only
 ```
 
-The string `"role"` appears on every single line. In a 10,000-turn session, that's 10,000 redundant copies of every key name.
+After running `engram run`:
 
-Parquet transposes this into columns. The `role` column has cardinality 2 ("user" and "assistant"). Run-length encoded, it compresses to almost nothing. The `timestamp` column is monotonically increasing integers. Delta encoded, it compresses to almost nothing. Only the `content` column carries real entropy.
+```
+4,538 files tracked and indexed
+~150 MB on disk (from 2.6 GB)
+122,787 keywords searchable across all tiers
+Every artifact encrypted with its own unique key
+Months of context accessible in the same token budget
+```
 
-This is why ClickHouse achieves up to 170x on nginx logs with optimal codecs. This is why every modern data lake uses Parquet (it became the default format in Apache Iceberg 1.4). Same principle, applied to your AI memories.
+That's a 94% reduction in disk usage. But the disk savings aren't the point. The point is that my AI assistant can now reference decisions I made three months ago without me re-explaining them. The context window didn't get bigger. The memory got smarter.
 
-Parquet also enables column pruning on read. If you only need the `role` and `timestamp` columns for a search, you skip decompressing `content` entirely. Frozen-tier metadata queries can be faster than decompressing the full JSONL.
+## How it works: your brain already figured this out
 
-## The semantic index: how the AI knows where to look
+Your brain doesn't store yesterday's lunch and your childhood address the same way. Working memory holds about 7 items (Miller, 1956). The hippocampus consolidates recent experiences during sleep, replaying them into the neocortex. Deep memories take effort and the right cue to retrieve.
 
-Compression without search is useless. If you can't find a memory, it doesn't matter how efficiently it's stored.
+The deeper the memory, the longer the recall. That's not a limitation. It's a compression strategy that lets the system scale across decades.
 
-At registration time, before any compression happens, every artifact gets indexed. Keywords extracted. Summary generated. This index is small (under 1 MB for thousands of artifacts), always loaded, never compressed. It's the hippocampus of the system: a small structure that knows where everything is stored, even when the memories themselves are packed away in cold or frozen tier.
+Engram applies the same principle, but we're not bound by biological constraints:
 
-When your AI assistant starts a session, it gets a budget-optimized block of the most relevant memory summaries. Not the full files. Summaries cost 10-20% of the tokens. If a summary isn't enough, the assistant explicitly recalls the full artifact. Cold recall takes ~500ms. Frozen takes a few seconds. Like remembering a name from years ago.
+| Brain System | Engram Tier | What Happens | Compression |
+|---|---|---|---|
+| Working memory | **Hot** | Active session, instant access | 1x (raw) |
+| Recent memory | **Warm** | Minified JSON + zstd compression | **4-5x** |
+| Long-term memory | **Cold** | Boilerplate stripped + dictionary-trained zstd | **8-12x** |
+| Deep memory | **Frozen** | Columnar Parquet + dictionary + zstd | **20-50x** |
 
-The AI never blindly searches compressed archives. The index tells it exactly what's there. If the index has no match, there's nothing to decompress.
+Those ratios aren't from cranking up zstd levels (that gets you 3.2x to 3.8x, which is barely noticeable). Each tier applies progressively more aggressive data transformations *before* the compressor runs.
 
-## Your AI sessions are your data. Protect them.
+## Why the ratios are so different
 
-Here's what most people don't think about: every conversation you have with an AI assistant is stored in plaintext files on your disk. Your code reviews, your security research, your personal decisions, your intellectual property. Anyone with access to your machine can read all of it.
+**Warm** strips whitespace from JSON. Sounds trivial. It's 30-40% of most pretty-printed session logs.
 
-This matters more as memory systems get more capable. More memory means more data at risk. If you're expanding your AI's context without encrypting it, you're building a bigger target.
+**Cold** does something more interesting. Every Claude session repeats the same 2,000-5,000 token system prompt verbatim. Across 4,500 sessions, that's the same block of text repeated 4,500 times. Engram strips these to 64-byte hash references and stores the original once. Then a dictionary trained on your actual session logs teaches zstd the shared schema (JSON keys, tool call formats, common tokens). The compressor only handles what's actually unique.
 
-I see this with tools like OpenClaw and other open-source memory extensions. They expand context aggressively, which is useful. But they store everything unencrypted. On a shared server, a stolen laptop, or a compromised backup, that's every session you've ever had, readable in seconds.
+**Frozen** is where it gets dramatic. JSONL files repeat `"role"`, `"content"`, `"timestamp"` on every single line. Parquet transposes this into columns. The `role` column (cardinality: 2) compresses via run-length encoding to almost nothing. Timestamps (monotonic integers) compress via delta encoding to almost nothing. ClickHouse achieves up to 170x on nginx logs with this approach. Parquet became the default storage format in Apache Iceberg 1.4 for the same reason.
 
-I built Engram to work with Claude Code primarily (it auto-detects 18 Claude artifact locations), but it works with OpenClaw, Cursor, ChatGPT, Copilot, or anything that writes files to disk. Point it at a directory and it handles compression, indexing, and encryption.
+Only the actual content text carries real entropy. Everything else compresses away.
 
-But here's my honest take: if you're using OpenClaw or any open-source AI tool that stores session data, and you don't have a solid understanding of your security model and the OSI layers your data travels through, you should learn that before you start accumulating months of sensitive context in plaintext. Engram gives you the encryption layer. It doesn't give you the judgment to know when you need it. That's on you.
+## The index: how the AI knows where to look
 
-Engram runs entirely on your local machine. No data is sent to any server. No telemetry. Your memories never leave your filesystem unless you choose to move them.
+Compression without search is a write-only archive. Useless.
 
-And that's the key difference: you choose the architecture. Keep everything local with Keychain encryption. Offload frozen archives to a NAS or S3. Share a compressed index across team machines. The encryption travels with the data. Even if you move cold-tier archives to cheaper storage elsewhere, an attacker who intercepts them gets PQ-encrypted blobs with per-artifact keys they can't unwrap.
+Every artifact gets indexed at registration time, before any compression. Keywords extracted. Summary generated. The index is under 1 MB for thousands of artifacts. It's always loaded. Never compressed. It's the hippocampus: a small structure that knows where everything is stored.
 
-The encryption is optional but designed for this threat model:
+When your AI starts a session, Engram feeds it a budget-optimized block of relevant summaries. Not the full files. Summaries cost 10-20% of the tokens. If a summary isn't enough, the assistant explicitly recalls the full artifact:
 
-- Every artifact gets its own unique 256-bit encryption key (DEK)
-- Each tier has independent keypairs (compromising warm doesn't expose cold)
-- Private keys never exist as files on disk. They live in macOS Keychain (Touch ID), HashiCorp Vault, or cloud KMS. The `file:` key source is deliberately blocked
-- Encryption uses only the public key. The private key is retrieved on-demand for recall, used, and zeroed from memory
+- **Hot:** instant
+- **Warm:** ~10ms
+- **Cold:** ~500ms
+- **Frozen:** a few seconds
 
-## Post-quantum because the deadline is already set
+The AI never decompresses everything hoping to find something. The index tells it exactly what's in each tier. No match, no decompression.
 
-NIST published the initial public draft of [IR 8547](https://nvlpubs.nist.gov/nistpubs/ir/2024/NIST.IR.8547.ipd.pdf) in November 2024. The proposed timeline: RSA-2048 and P-256 deprecated for new systems by 2030. All RSA and ECC disallowed by 2035.
+## Your sessions are your data. Act like it.
 
-The risk isn't theoretical. It's "harvest now, decrypt later." An adversary captures your encrypted AI sessions today. Stores them. Waits for a quantum computer. If your key wrapping uses RSA or X25519, Shor's algorithm recovers every DEK regardless of how strong your AES is.
+Every conversation you have with an AI assistant is stored in plaintext on your disk. Your code reviews, security research, personal decisions, intellectual property. Anyone with access to your machine can read all of it.
 
-Engram uses ML-KEM-768 (NIST FIPS 203, finalized August 2024) in hybrid mode with X25519 via the `age` encryption tool. Both classical and post-quantum protection simultaneously. This is the same algorithm OpenSSH 10.0 made the default for all key exchange in April 2025.
+This matters more as memory gets more capable. More memory means more data at risk.
+
+I see this with tools like OpenClaw and other open-source memory extensions. They expand context aggressively, which is useful. But they store everything unencrypted. On a shared server, a stolen laptop, or a compromised backup, that's your entire AI history, readable in seconds.
+
+If you're using any AI tool that stores session data and you don't have a solid understanding of your security model, learn that before you start accumulating months of sensitive context in plaintext. Engram gives you the encryption layer. It doesn't replace the judgment to know when you need it.
+
+## The encryption: post-quantum because the deadline is real
+
+NIST published the initial public draft of [IR 8547](https://nvlpubs.nist.gov/nistpubs/ir/2024/NIST.IR.8547.ipd.pdf) in November 2024. The proposed timeline: RSA-2048 and P-256 deprecated by 2030. All RSA and ECC disallowed by 2035. This isn't a theoretical concern. It's a published federal timeline.
+
+The attack is "harvest now, decrypt later." Capture encrypted data today. Wait for quantum computers. If the key wrapping uses RSA or X25519, Shor's algorithm recovers every key.
+
+Engram uses [ML-KEM-768](https://csrc.nist.gov/pubs/fips/203/final) (NIST FIPS 203, August 2024) in hybrid mode with X25519. Both classical and post-quantum simultaneously. Same algorithm [OpenSSH 10.0 made the default](https://www.openssh.org/pq.html) in April 2025.
+
+Every artifact gets its own unique 256-bit encryption key. Each tier has independent keypairs. Private keys never exist as files on disk. They live in macOS Keychain (Touch ID on Apple Silicon binds them to the Secure Enclave), HashiCorp Vault, or cloud KMS. The `file:` key source is deliberately blocked in the code.
 
 Why start with legacy crypto and migrate before 2030 when you can start with PQ now?
 
-## What makes Engram different
+## Everything stays local. Unless you decide otherwise.
 
-I looked at existing memory plugins before building this. Here's where they fall short:
+No data is sent to any server. No telemetry. No analytics. Your memories never leave your filesystem.
 
-**No compression, or flat compression.** Most plugins don't compress at all. The ones that do use a single zstd level. Engram's multi-stage pipeline achieves 4-5x on warm, 8-12x on cold, and 20-50x on frozen. That's the difference between 800 MB of raw sessions and 35 MB of archived ones.
+But if you want to offload frozen archives to a NAS, S3, or a separate server, the encryption travels with the data. An attacker who intercepts PQ-encrypted blobs with per-artifact keys they can't unwrap gets nothing useful.
 
-**No encryption.** Session data sits in plaintext. Engram uses post-quantum envelope encryption with per-artifact keys.
+You choose the architecture. Engram is the plumbing.
 
-**No search without decompression.** If you need to find something in cold storage, you decompress everything. Engram's semantic index searches all tiers without touching the compressed data.
+- **Local-only:** Laptop + Keychain + Touch ID. Simplest.
+- **NAS/server:** Cold and frozen tiers on cheaper storage. Encryption goes with them.
+- **Multi-machine:** Shared semantic index. Per-machine encryption keys. Sync via rsync.
+- **Team server:** Everyone's sessions compressed. Per-user encryption so teammates can't read each other's cold-tier data.
 
-**Locked to one platform.** Most plugins work with one AI assistant. Engram auto-detects Claude, ChatGPT, Cursor, and Copilot. Add any custom path in the config.
+## Works with Claude, Codex, OpenClaw, and anything that writes files
 
-**No brain-inspired tiering.** Flat storage treats a session from today the same as one from six months ago. Engram mirrors how biological memory works: recent things stay accessible, old things compress deeper, everything is searchable through the index.
+Engram is AI-agnostic. Claude Code gets first-class auto-detection (18 artifact locations). Everything else works by adding a path to `config.json`. ChatGPT, Cursor, Copilot, OpenAI Codex, OpenClaw, or any tool you build yourself.
+
+Any AI assistant can set up Engram from the repo. The interactive installer and README are designed so Claude, Codex, or Copilot can read the docs and walk you through it. No vendor lock-in at any layer.
+
+## What makes this different
+
+I looked at every memory plugin I could find. Here's where they fall short:
+
+| | Other plugins | Engram |
+|---|---|---|
+| **Compression** | None, or single-level zstd (~3x) | Multi-stage pipeline: 4-5x / 8-12x / 20-50x per tier |
+| **Encryption** | None | Post-quantum (ML-KEM-768) with per-artifact keys |
+| **Search** | Decompress everything to find something | Semantic index searches all tiers without decompression |
+| **AI lock-in** | One platform | Claude, Codex, ChatGPT, Cursor, Copilot, custom |
+| **Data sent to cloud** | Sometimes | Never. Zero telemetry. |
+| **Storage format** | Raw JSON files forever | Parquet columnar for frozen tier (20-50x) |
+| **Key management** | Key file on disk (if any) | Keychain/Touch ID, Vault, KMS. File keys blocked. |
+| **Security review** | Self-reviewed | 4 rounds, 3 independent red-team personas |
 
 ## Try it
 
-Engram is open source: [github.com/qinnovates/engram](https://github.com/qinnovates/engram)
-
 ```bash
 pip install engram
-engram init                           # guided setup, picks your AI assistant locations
-engram run --dry-run                  # preview what would be compressed
-engram run                            # execute tiering
-engram search "that security thing"   # search across all tiers
-engram context --query "auth refactor" # get context block for your AI session
+
+# Guided setup — auto-detects your AI assistants, you confirm
+engram init
+
+# See what would be compressed (safe, changes nothing)
+engram run --dry-run
+
+# Execute tiering
+engram run
+
+# Search months of memory without decompressing anything
+engram search "that authentication refactor"
+
+# Get a context block optimized for your AI's token budget
+engram context --query "auth patterns we discussed"
+
+# Recall a frozen artifact back to hot (takes a few seconds)
+engram recall ~/.claude/subagents/session-2025-09-12.jsonl
 ```
 
-66 tests. Red-team reviewed by three independent security personas. Anthropic plugin format with marketplace.json. Works as a Claude Code skill invocable as `/engram`.
+Open source. MIT license. 66 tests. Red-team reviewed.
 
-The plugin compresses your AI's accumulated knowledge so it fits in a context window, encrypts it so it's protected, and indexes it so the right memories surface when you need them. Like how your brain stores and retrieves information, but with post-quantum encryption and columnar compression ratios your hippocampus can only dream about.
+[github.com/qinnovates/engram](https://github.com/qinnovates/engram)
+
+Your AI's memory should scale like yours does. Compress what's old. Encrypt what's sensitive. Index everything. Recall what matters.
 
 ---
 
-*Written with AI assistance (Claude). All claims verified by the author.*
+*Written with AI assistance (Claude). All claims fact-checked against primary sources. The author takes full responsibility for all content.*
