@@ -211,6 +211,35 @@ class TieringEngine:
         self.metadata.save()
         self.index.save()
 
+        # Encrypt hot artifacts at rest if configured
+        if (self.config.encryption.enabled
+                and self.config.encryption.encrypt_hot
+                and self.config.encryption.recipient_pubkey):
+            self._encrypt_hot_artifacts(paths)
+
+    def _encrypt_hot_artifacts(self, paths: list[Path]) -> None:
+        """Encrypt hot-tier artifacts in place (opt-in, off by default).
+
+        Only encrypts files that aren't already encrypted (.age).
+        The encrypted file replaces the original. Recall requires
+        decryption (Touch ID / vault access).
+        """
+        from .encryption import encrypt_file
+        for p in paths:
+            if not p.exists() or p.name.endswith(".age"):
+                continue
+            try:
+                encrypted = encrypt_file(p, self.config.encryption,
+                                         remove_original=True)
+                meta = self.metadata.get(p)
+                if meta:
+                    meta.encrypted = True
+                    meta.compressed_path = str(encrypted)
+                    self.metadata._dirty = True
+            except (OSError, EncryptionError):
+                pass  # Skip files that fail — don't break the scan
+        self.metadata.save()
+
     def evaluate_and_tier(self) -> list[TierAction]:
         """
         Evaluate all tracked artifacts and perform tier transitions.

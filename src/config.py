@@ -123,6 +123,13 @@ class EncryptionConfig:
     identity_path: Optional[str] = None
     # If True, encrypts AFTER compression (compress-then-encrypt)
     encrypt_after_compress: bool = True
+    # Encrypt hot tier artifacts at rest. Disabled by default because it
+    # adds a decryption step (Touch ID / vault access) on every file read.
+    # Enable if your threat model requires all data encrypted at rest,
+    # including active session files. Performance cost: ~1-2s per recall
+    # (biometric prompt). Most users don't need this — warm/cold/frozen
+    # encryption covers old sessions where the real risk is.
+    encrypt_hot: bool = False
 
 
 @dataclass
@@ -323,6 +330,7 @@ class EngineConfig:
 
         known_enc_fields = {
             "enabled", "recipient_pubkey", "identity_path", "encrypt_after_compress",
+            "encrypt_hot",
         }
         enc_data = {k: v for k, v in data.get("encryption", {}).items()
                     if k in known_enc_fields}
