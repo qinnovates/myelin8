@@ -572,6 +572,8 @@ This software is provided as-is under the MIT license with no warranty. It has b
 
 Encryption is optional but recommended. Engram works without it — you get compression, indexing, and context enhancement either way. But if your AI sessions contain code, security research, personal decisions, or anything you wouldn't want an attacker to read, enable it.
 
+**Config security:** `~/.engram/config.json` contains your public key and scan target paths. While the public key alone can't decrypt anything, it's still operational metadata you shouldn't leak. The config is `.gitignore`d by default, written with `0600` permissions (owner-only), and should never be committed to a repo or shared publicly.
+
 **Encryption scope:** PQ encryption (ML-KEM-768, FIPS 203) protects data at rest. It does not protect against a compromised process with memory access or an attacker who has your private key. The `age` tool's PQ hybrid is described by its author as production-ready; the classical X25519 + ChaCha20-Poly1305 layer was audited by Cure53.
 
 ## AI Disclosure
