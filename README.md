@@ -4,7 +4,9 @@ AI context windows have a hard limit. Fill it up and the oldest memories fall of
 
 Engram solves this the way the brain does. Your brain doesn't hold everything in working memory. It tiers: recent experiences stay vivid (hot), recent days consolidate (warm), older memories compress into patterns (cold), deep memories take effort to surface (frozen). Each tier trades retrieval speed for storage efficiency.
 
-Engram applies this to your AI's memory. Four compression tiers, a searchable semantic index, and optional post-quantum encryption — so months of context fit in the same token budget that used to hold a few sessions.
+This isn't a new idea in AI. DeepSeek-V2 ([arXiv:2405.04434](https://arxiv.org/abs/2405.04434)) applied the same principle to attention itself: instead of recalculating full key/value tensors for every token, they precompute and cache compressed latent vectors — reducing KV cache by 93.3% and achieving 5.76x throughput. Same insight: don't recompute what you can store compressed and recall on demand.
+
+Engram applies this to your AI's *memory*. Four compression tiers, a searchable semantic index, and optional post-quantum encryption — so months of context fit in the same token budget that used to hold a few sessions. Save hardware resources at scale while protecting what matters.
 
 ```
 HOT (now)    ████████████████████████████████████████  1,500 KB   1x    instant
