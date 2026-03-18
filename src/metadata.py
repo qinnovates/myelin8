@@ -112,22 +112,23 @@ class MetadataStore:
 
         if key in self._artifacts:
             meta = self._artifacts[key]
-            # Update access time
-            meta.last_accessed = now
+            # DON'T update last_accessed on re-registration — only on explicit
+            # recall or touch. Otherwise every scan resets idle timers and
+            # nothing ever moves to warm/cold/frozen.
             if path.exists():
                 stat = path.stat()
                 meta.last_modified = stat.st_mtime
                 meta.original_size = stat.st_size
             return meta
 
-        # New artifact
+        # New artifact — use real file timestamps for correct tier placement
         if path.exists():
             stat = path.stat()
             meta = ArtifactMeta(
                 path=key,
                 tier=Tier.HOT.value,
                 created_at=stat.st_ctime,
-                last_accessed=now,
+                last_accessed=stat.st_atime,  # Real OS access time, not now
                 last_modified=stat.st_mtime,
                 original_size=stat.st_size,
                 sha256=compute_sha256(path),
