@@ -1,6 +1,6 @@
 ---
 name: engram
-description: Manage AI memory artifacts with tiered compression (hot/warm/cold/frozen), semantic search, progressive recall, and optional post-quantum encryption. Use when the user mentions memory management, context optimization, compressing old sessions, searching past conversations, recalling archived memories, encrypting AI data, or managing artifact storage.
+description: Extends AI context windows by modeling how the brain stores memory — short-term stays fast, long-term compresses deep. Four storage tiers (hot/warm/cold/frozen) with 4-50x compression ratios, semantic search across all tiers without decompressing, and optional post-quantum encryption (ML-KEM-768) to protect your AI's memory at rest. Use when the user mentions memory, context window, compression, searching old sessions, recalling past conversations, encrypting AI data, or managing storage.
 allowed-tools: Read, Bash(engram *), Bash(python3 -m src.cli *), Grep, Glob
 user-invocable: true
 argument-hint: "[command or example name]"
