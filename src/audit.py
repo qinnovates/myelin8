@@ -2,17 +2,21 @@
 Minimal audit logger for Engram operations.
 
 Logs: timestamp, operation, tier, short artifact hash, outcome.
-Does NOT log: file paths, filenames, key sources, query strings,
-content, keywords, summaries, usernames.
+
+NEVER logs: file paths, filenames, key sources, query strings,
+content, keywords, summaries, usernames, private keys, secrets.
+
+All log lines pass through PII/secret detection before writing.
+If a line matches a secret pattern, it is BLOCKED and replaced
+with a redaction notice.
 
 Format: one line per event, append-only, 0600 permissions.
-An attacker who reads the audit log learns that you tiered 37 things
-and recalled one. They don't learn what any of them are.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -20,9 +24,33 @@ from pathlib import Path
 # 10 MB cap — prevents disk fill under adversarial conditions
 MAX_AUDIT_BYTES = 10 * 1024 * 1024
 
+# PII and secret detection patterns — if ANY match, the line is blocked
+_SECRET_PATTERNS = [
+    re.compile(r'AGE-SECRET-KEY-[A-Z0-9]+', re.IGNORECASE),       # age private key
+    re.compile(r'age1[a-z0-9]{58}'),                                # age public key (still metadata)
+    re.compile(r'-----BEGIN .* KEY-----'),                          # PEM keys
+    re.compile(r'ssh-(rsa|ed25519|ecdsa)\s+\S{20,}'),             # SSH keys
+    re.compile(r'AKIA[0-9A-Z]{16}'),                               # AWS access key
+    re.compile(r'sk-[a-zA-Z0-9]{20,}'),                            # OpenAI/Anthropic API key
+    re.compile(r'ghp_[a-zA-Z0-9]{36,}'),                           # GitHub PAT
+    re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),# Email addresses
+    re.compile(r'/Users/[a-zA-Z0-9._-]+/'),                        # macOS home paths (PII)
+    re.compile(r'/home/[a-zA-Z0-9._-]+/'),                         # Linux home paths (PII)
+    re.compile(r'password|passwd|secret|token|credential',
+               re.IGNORECASE),                                      # Secret keywords in values
+]
+
+
+def _contains_secret(line: str) -> bool:
+    """Check if a log line contains any secret or PII pattern."""
+    for pattern in _SECRET_PATTERNS:
+        if pattern.search(line):
+            return True
+    return False
+
 
 class AuditLogger:
-    """Append-only audit logger with minimal metadata."""
+    """Append-only audit logger with PII/secret detection."""
 
     def __init__(self, log_dir: Path):
         self.log_path = log_dir / "audit.log"
@@ -39,8 +67,12 @@ class AuditLogger:
             os.close(fd)
 
     def _write(self, line: str) -> None:
-        """Append a single line to the audit log. Drops writes if log exceeds 10MB."""
+        """Append a line to the audit log. Blocks lines containing secrets/PII."""
         try:
+            # PII/secret gate — block any line that matches a secret pattern
+            if _contains_secret(line):
+                line = f"{self._ts()} REDACTED — log line contained potential secret/PII"
+
             if self.log_path.exists() and self.log_path.stat().st_size > MAX_AUDIT_BYTES:
                 return  # Log full — silently drop. User should rotate.
             with open(self.log_path, "a") as f:

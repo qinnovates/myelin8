@@ -7,35 +7,25 @@
 //!   Python (Engram) → stdin command → engram-vault → age → stdout result
 //!
 //! Key material flow:
-//!   macOS Keychain → this process (mlock'd, zeroize-on-drop) → age stdin
-//!   Key NEVER: touches disk, enters Python, appears in process args, hits swap
+//!   macOS Keychain (software keychain, NOT Secure Enclave) →
+//!   this process (mlock'd, zeroize-on-drop) → age stdin pipe
+//!
+//! Key NEVER: touches disk, enters Python, appears in process args
+//! Key MAY: exist in this process's locked memory during decrypt (milliseconds)
+//!
+//! Security hardening:
+//!   - mlockall: prevents key material from being swapped to disk
+//!   - RLIMIT_CORE=0: prevents core dumps from leaking key material
+//!   - zeroize: deterministic memory zeroing (not GC-dependent)
+//!   - env_clear: age subprocess gets clean environment (no LD_PRELOAD)
+//!   - Input validation: reject paths with newlines/nulls (injection prevention)
 //!
 //! Protocol (stdin/stdout, one command per line):
-//!   ENCRYPT <input_path> <output_path> <tier>
-//!     → Encrypts file with tier's public key from Keychain
-//!     → Responds: OK or ERROR <message>
-//!
-//!   DECRYPT <input_path> <output_path> <tier>
-//!     → Retrieves tier's private key from Keychain
-//!     → Decrypts file with age
-//!     → Zeros key from memory
-//!     → Responds: OK or ERROR <message>
-//!
-//!   STORE <tier> <public_key>
-//!     → Generates age keypair
-//!     → Stores private key in Keychain (via Security.framework)
-//!     → Returns public key
-//!     → Zeros private key from memory
-//!     → Responds: OK <public_key> or ERROR <message>
-//!
-//!   ROTATE <tier> <new_public_key>
-//!     → Retrieves old private key from Keychain
-//!     → Stores new key pair
-//!     → Zeros old key
-//!     → Responds: OK or ERROR <message>
-//!
-//!   PING → PONG (health check)
-//!   QUIT → exits
+//!   ENCRYPT <input_path> <output_path> <tier> → OK | ERROR <msg>
+//!   DECRYPT <input_path> <output_path> <tier> → OK | ERROR <msg>
+//!   KEYGEN <tier>                              → OK <pubkey> | ERROR <msg>
+//!   PING                                       → PONG
+//!   QUIT                                       → BYE
 
 use std::io::{self, BufRead, Write};
 use std::process::{Command, Stdio};
@@ -44,13 +34,29 @@ use zeroize::Zeroize;
 mod keychain;
 
 fn main() {
-    // Lock memory to prevent swapping key material to disk
+    // === Security hardening at startup ===
+
     #[cfg(unix)]
     unsafe {
-        // Request mlock on our entire address space
-        // This is best-effort — requires appropriate ulimits
-        libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE);
+        // 1. Lock memory — prevent key material from being swapped to disk
+        let mlock_result = libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE);
+        if mlock_result != 0 {
+            eprintln!(
+                "WARNING: mlockall failed (errno {}). Key material may be swappable. \
+                 Increase ulimit -l or run with appropriate privileges.",
+                *libc::__error()
+            );
+        }
+
+        // 2. Disable core dumps — prevent crash from leaking key material
+        let zero_core = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        libc::setrlimit(libc::RLIMIT_CORE, &zero_core);
     }
+
+    // === Main command loop ===
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -75,6 +81,11 @@ fn main() {
             "ENCRYPT" => {
                 if parts.len() < 4 {
                     "ERROR Usage: ENCRYPT <input> <output> <tier>".to_string()
+                } else if let Err(e) = validate_path(parts[1])
+                    .and(validate_path(parts[2]))
+                    .and(validate_tier(parts[3]))
+                {
+                    e
                 } else {
                     handle_encrypt(parts[1], parts[2], parts[3])
                 }
@@ -82,6 +93,11 @@ fn main() {
             "DECRYPT" => {
                 if parts.len() < 4 {
                     "ERROR Usage: DECRYPT <input> <output> <tier>".to_string()
+                } else if let Err(e) = validate_path(parts[1])
+                    .and(validate_path(parts[2]))
+                    .and(validate_tier(parts[3]))
+                {
+                    e
                 } else {
                     handle_decrypt(parts[1], parts[2], parts[3])
                 }
@@ -89,30 +105,71 @@ fn main() {
             "KEYGEN" => {
                 if parts.len() < 2 {
                     "ERROR Usage: KEYGEN <tier>".to_string()
+                } else if let Err(e) = validate_tier(parts[1]) {
+                    e
                 } else {
                     handle_keygen(parts[1])
                 }
             }
-            _ => format!("ERROR Unknown command: {}", parts[0]),
+            _ => "ERROR Unknown command".to_string(),
         };
+
+        // Audit log to stderr (not stdout — stdout is the protocol channel)
+        eprintln!(
+            "{} {}",
+            chrono_now(),
+            response.split_whitespace().next().unwrap_or("?")
+        );
 
         let _ = writeln!(stdout, "{}", response);
         let _ = stdout.flush();
     }
 }
 
-/// Encrypt a file using the tier's public key from Keychain.
-/// Public key retrieval is safe — no secret involved.
+// === Input validation (prevents command injection via newlines/nulls) ===
+
+fn validate_path(path: &str) -> Result<(), String> {
+    if path.contains('\n') || path.contains('\r') || path.contains('\0') {
+        Err("ERROR Invalid path — contains newline or null byte".to_string())
+    } else if path.is_empty() {
+        Err("ERROR Empty path".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_tier(tier: &str) -> Result<(), String> {
+    match tier {
+        "warm" | "cold" | "frozen" | "hot" | "test" => Ok(()),
+        _ => Err(format!(
+            "ERROR Invalid tier '{}' — must be warm, cold, or frozen",
+            &tier[..tier.len().min(10)]
+        )),
+    }
+}
+
+fn chrono_now() -> String {
+    // Simple timestamp without pulling in chrono crate
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{}", secs)
+}
+
+// === Encrypt (public key only — no secret involved) ===
+
 fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
-    // Retrieve the PUBLIC key from Keychain (not secret — safe)
     let pubkey = match keychain::get_public_key(tier) {
         Ok(k) => k,
         Err(e) => return format!("ERROR {}", e),
     };
 
-    // age -r <pubkey> -o <output> <input>
+    // Clear environment to prevent LD_PRELOAD / PATH hijacking of age
     let result = Command::new("age")
         .args(["-r", &pubkey, "-o", output, input])
+        .env_clear()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .status();
@@ -124,20 +181,19 @@ fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
     }
 }
 
-/// Decrypt a file using the tier's private key from Keychain.
-/// The private key is retrieved, piped to age via stdin, then zeroed.
-/// It NEVER: touches disk, appears in process args, enters Python.
+// === Decrypt (private key from Keychain → age stdin → zeroed) ===
+
 fn handle_decrypt(input: &str, output: &str, tier: &str) -> String {
-    // Retrieve private key from Keychain — stays in this process only
+    // Retrieve private key — stays in this process's mlock'd memory only
     let mut private_key = match keychain::get_private_key(tier) {
         Ok(k) => k,
         Err(e) => return format!("ERROR {}", e),
     };
 
-    // Pipe private key to age via stdin using process substitution
-    // age -d -i - reads identity from stdin (not from a file or argv)
+    // Pipe key to age via stdin — clear environment to prevent hijacking
     let mut child = match Command::new("age")
         .args(["-d", "-i", "/dev/stdin", "-o", output, input])
+        .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -150,29 +206,36 @@ fn handle_decrypt(input: &str, output: &str, tier: &str) -> String {
         }
     };
 
-    // Write private key to age's stdin
+    // Write private key to age's stdin pipe
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(private_key.as_bytes());
-        // stdin is dropped here, closing the pipe
+        // stdin dropped here — closes the pipe
     }
 
-    // Zero the key IMMEDIATELY after piping — before waiting for age to finish
+    // Zero the key IMMEDIATELY after piping
     private_key.zeroize();
 
-    // Wait for age to complete
     match child.wait() {
         Ok(status) if status.success() => "OK".to_string(),
-        Ok(_) => "ERROR age decrypt failed — wrong key or corrupted file".to_string(),
-        Err(e) => format!("ERROR age process failed: {}", e),
+        Ok(_) => "ERROR age decrypt failed".to_string(),
+        Err(e) => format!("ERROR age process error: {}", e),
     }
 }
 
-/// Generate a new age keypair for a tier and store in Keychain.
-/// The private key goes directly from age-keygen → Keychain.
-/// It exists only in this process's mlock'd memory, then is zeroed.
+// === Keygen (age-keygen → Keychain, private key zeroed) ===
+
 fn handle_keygen(tier: &str) -> String {
-    // Run age-keygen, capture output
+    // Check if keys already exist — refuse to silently overwrite
+    if keychain::get_private_key(tier).is_ok() {
+        return format!(
+            "ERROR Key already exists for tier '{}'. Delete it first or use a different tier.",
+            tier
+        );
+    }
+
+    // Run age-keygen with clean environment
     let output = match Command::new("age-keygen")
+        .env_clear()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -185,48 +248,69 @@ fn handle_keygen(tier: &str) -> String {
         return "ERROR age-keygen failed".to_string();
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse output — minimize intermediate String copies
     let mut pubkey = String::new();
-    let mut privkey = String::new();
+    let mut privkey_bytes: Vec<u8> = Vec::new();
 
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.starts_with("# public key:") {
-            pubkey = line.split("# public key:").nth(1).unwrap_or("").trim().to_string();
-        } else if line.starts_with("AGE-SECRET-KEY-") {
-            privkey = line.to_string();
+    for line in output.stdout.split(|&b| b == b'\n') {
+        let trimmed = std::str::from_utf8(line).unwrap_or("").trim();
+        if trimmed.starts_with("# public key:") {
+            pubkey = trimmed
+                .split("# public key:")
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+        } else if trimmed.starts_with("AGE-SECRET-KEY-") {
+            privkey_bytes = trimmed.as_bytes().to_vec();
         }
     }
 
-    if pubkey.is_empty() || privkey.is_empty() {
+    if pubkey.is_empty() || privkey_bytes.is_empty() {
+        privkey_bytes.zeroize();
         return "ERROR Failed to parse age-keygen output".to_string();
     }
 
-    // Store BOTH keys in Keychain
-    // Public key: stored for encryption (not secret but needed for recall)
+    // Convert to string for Keychain storage, then zero the vec
+    let privkey_str = String::from_utf8_lossy(&privkey_bytes).to_string();
+    privkey_bytes.zeroize();
+
+    // Store in Keychain
     if let Err(e) = keychain::store_public_key(tier, &pubkey) {
-        privkey.zeroize();
+        let mut pk = privkey_str;
+        pk.zeroize();
         return format!("ERROR Failed to store public key: {}", e);
     }
 
-    // Private key: stored for decryption (SECRET — goes to Keychain, then zeroed)
-    if let Err(e) = keychain::store_private_key(tier, &privkey) {
-        privkey.zeroize();
-        return format!("ERROR Failed to store private key: {}", e);
+    let store_result = keychain::store_private_key(tier, &privkey_str);
+
+    // Zero private key string
+    let mut pk = privkey_str;
+    pk.zeroize();
+
+    match store_result {
+        Ok(()) => format!("OK {}", pubkey),
+        Err(e) => format!("ERROR Failed to store private key: {}", e),
     }
-
-    // Zero the private key from memory — deterministic, not GC-dependent
-    privkey.zeroize();
-
-    format!("OK {}", pubkey)
 }
 
-// libc bindings for mlockall
+// === libc bindings ===
+
 #[cfg(unix)]
 mod libc {
-    extern "C" {
-        pub fn mlockall(flags: i32) -> i32;
+    #[repr(C)]
+    pub struct rlimit {
+        pub rlim_cur: u64,
+        pub rlim_max: u64,
     }
+
+    pub const RLIMIT_CORE: i32 = 4; // macOS value
     pub const MCL_CURRENT: i32 = 1;
     pub const MCL_FUTURE: i32 = 2;
+
+    extern "C" {
+        pub fn mlockall(flags: i32) -> i32;
+        pub fn setrlimit(resource: i32, rlp: *const rlimit) -> i32;
+        pub fn __error() -> *mut i32; // macOS errno
+    }
 }

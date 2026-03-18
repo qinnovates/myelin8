@@ -1,8 +1,11 @@
 //! macOS Keychain integration via Security.framework.
 //!
 //! Uses the security-framework crate which wraps Apple's native
-//! Security.framework APIs. Keys are stored and retrieved via the
-//! OS keychain — on Apple Silicon, this uses the Secure Enclave.
+//! Security.framework APIs. Keys are stored in the macOS login keychain
+//! (software keychain), NOT the Secure Enclave. The Secure Enclave only
+//! supports P-256 asymmetric operations, not age/X25519 keys.
+//! Keys are protected by the user's login password and (if configured)
+//! biometric unlock, but they are extractable via Keychain API.
 //!
 //! The key goes: Keychain → this process's mlock'd memory → age stdin
 //! It NEVER: touches disk, enters Python, appears in process args

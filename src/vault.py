@@ -96,12 +96,25 @@ class VaultClient:
             self._proc = None
             raise EncryptionError("engram-vault process died unexpectedly")
 
+    @staticmethod
+    def _validate_input(value: str, name: str) -> None:
+        """Reject inputs that could inject commands via the line protocol."""
+        if "\n" in value or "\r" in value or "\0" in value:
+            raise EncryptionError(
+                f"Invalid {name} — contains newline or null byte"
+            )
+        if not value:
+            raise EncryptionError(f"Empty {name}")
+
     def encrypt(self, input_path: Path, output_path: Path, tier: str) -> None:
         """Encrypt a file using the tier's public key.
 
         Public key is retrieved from Keychain by the sidecar.
         No secret material involved on the Python side.
         """
+        self._validate_input(str(input_path), "input_path")
+        self._validate_input(str(output_path), "output_path")
+        self._validate_input(tier, "tier")
         response = self._send(
             f"ENCRYPT {input_path} {output_path} {tier}"
         )
@@ -116,6 +129,9 @@ class VaultClient:
         Private key is retrieved from Keychain by the sidecar,
         piped to age via stdin, then zeroed. Python never sees it.
         """
+        self._validate_input(str(input_path), "input_path")
+        self._validate_input(str(output_path), "output_path")
+        self._validate_input(tier, "tier")
         response = self._send(
             f"DECRYPT {input_path} {output_path} {tier}"
         )
@@ -129,8 +145,10 @@ class VaultClient:
 
         Private key goes directly into Keychain via Security.framework.
         Returns the public key (safe to store in config).
-        Private key never enters Python.
+        Private key NEVER enters Python — not in return values, not
+        in logs, not in error messages, not in terminal output.
         """
+        self._validate_input(tier, "tier")
         response = self._send(f"KEYGEN {tier}")
         if response.startswith("OK "):
             return response[3:].strip()
