@@ -55,13 +55,11 @@ Those ratios aren't from cranking zstd levels (that gets 3.2x to 3.8x). Each tie
 
 **Only the actual content carries real entropy. Everything else compresses away.**
 
-## Not a new idea — DeepSeek proved it at the model level
+## The principle, not the technique
 
-DeepSeek-V2 ([arXiv:2405.04434](https://arxiv.org/abs/2405.04434)) applied the same principle to attention: instead of recalculating full key/value tensors for every token, they precompute and cache compressed latent vectors. Result: 93.3% KV cache reduction, 5.76x throughput.
+DeepSeek-V2 ([arXiv:2405.04434](https://arxiv.org/abs/2405.04434)) showed that compressing what goes into the model's attention — caching small latent vectors instead of recalculating full key/value tensors — cut their KV cache by 93.3% and improved throughput 5.76x. They solved it inside the model.
 
-Same insight: don't recompute what you can store compressed and recall on demand.
-
-Engram applies this to your AI's persistent memory. Save hardware resources at scale. Fit months of context in the token budget that used to hold a few sessions.
+Engram solves it outside the model. Different layer of the stack, same principle: don't keep recalculating or reloading what you can store compressed and recall on demand. DeepSeek compressed the attention cache. Engram compresses the context memory. Both save hardware resources at scale by being smarter about what stays in memory and what gets stored efficiently.
 
 ## The search problem
 
