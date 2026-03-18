@@ -563,6 +563,15 @@ This software is provided as-is under the MIT license with no warranty. It has b
 - Test key recovery (`engram recall`) before relying on encryption for critical data
 - Know that boilerplate stripping stores extracted content in `~/.engram/boilerplate/` — if that directory is deleted, stripped content is lost (but can be re-extracted from the original if it still exists)
 
+**If you lose your private key, encrypted data is gone forever.** There is no recovery, no backdoor, no reset. That's the point of strong encryption — but it means your key management is critical:
+
+- **macOS:** Keychain + Touch ID is the easiest path. Apple Silicon binds keys to the Secure Enclave. Back up via iCloud Keychain or export the entry.
+- **Windows:** Native Keychain integration is not yet built in. Use a FIDO2 YubiKey for hardware-bound key storage, or HashiCorp Vault / cloud KMS.
+- **Linux:** Use a password manager (Bitwarden CLI), Vault, or cloud KMS via the `command:` source.
+- **Always:** Test `engram recall` on an encrypted artifact before trusting it with irreplaceable data. Keep a secure backup of your key. Treat this key like a master password — it unlocks everything.
+
+Encryption is optional but recommended. Engram works without it — you get compression, indexing, and context enhancement either way. But if your AI sessions contain code, security research, personal decisions, or anything you wouldn't want an attacker to read, enable it.
+
 **Encryption scope:** PQ encryption (ML-KEM-768, FIPS 203) protects data at rest. It does not protect against a compromised process with memory access or an attacker who has your private key. The `age` tool's PQ hybrid is described by its author as production-ready; the classical X25519 + ChaCha20-Poly1305 layer was audited by Cure53.
 
 ## AI Disclosure

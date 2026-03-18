@@ -144,18 +144,61 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
         print("Switching to interactive mode...")
         return run_interactive_setup(config_path)
 
-    # Step 4: Tier thresholds
+    # Step 4: Tier complexity
     print()
-    print("Tier thresholds (when memories move to deeper storage):")
-    print("  Hot → Warm:   48 hours old + 24 hours idle")
-    print("  Warm → Cold:  14 days old + 7 days idle")
-    print("  Cold → Frozen: 90 days old + 30 days idle")
+    print("How many storage tiers do you want?")
+    print()
+    print("  [2] Simple — Hot (recent) + Cold (old, compressed)")
+    print("      Good for most users. Less complexity.")
+    print()
+    print("  [4] Full — Hot + Warm + Cold + Frozen")
+    print("      Maximum compression. Each tier gets progressively")
+    print("      more aggressive. Best disk savings. Recommended.")
     print()
 
-    if _input_yn("Use recommended thresholds?"):
-        policy = TierPolicy()
+    tier_choice = _input_choice("  Choose [2/4]: ", ["2", "4"], default="4")
+
+    if tier_choice == "2":
+        # Simple: skip warm, go straight to cold at 48h
+        policy = TierPolicy(
+            hot_to_warm_age_hours=0,
+            hot_to_warm_idle_hours=0,
+            warm_to_cold_age_hours=48,
+            warm_to_cold_idle_hours=24,
+            cold_to_frozen_age_hours=99999,  # effectively disabled
+            cold_to_frozen_idle_hours=99999,
+        )
+        print("  Using 2-tier mode: Hot → Cold (48h old + 24h idle)")
     else:
-        policy = _configure_thresholds()
+        print()
+        print("Tier thresholds (when memories move to deeper storage):")
+        print("  Hot → Warm:    48 hours old + 24 hours idle")
+        print("  Warm → Cold:   14 days old + 7 days idle")
+        print("  Cold → Frozen: 90 days old + 30 days idle")
+        print()
+
+        if _input_yn("Use recommended thresholds?"):
+            policy = TierPolicy()
+        else:
+            policy = _configure_thresholds()
+
+    # Step 4b: Smart first-run analysis
+    print()
+    print("Analyzing file ages for initial tier placement...")
+    age_analysis = _analyze_file_ages(selected_targets, policy)
+    print(f"  Would stay hot (recent):  {age_analysis['hot']:,}")
+    print(f"  → Warm (days old):        {age_analysis['warm']:,}")
+    print(f"  → Cold (weeks old):       {age_analysis['cold']:,}")
+    print(f"  → Frozen (months old):    {age_analysis['frozen']:,}")
+    print()
+    if age_analysis['warm'] + age_analysis['cold'] + age_analysis['frozen'] > 0:
+        if _input_yn("Run initial tiering after setup to sort old files?"):
+            run_initial_tier = True
+        else:
+            run_initial_tier = False
+    else:
+        run_initial_tier = False
+        print("  All files are recent — nothing to tier yet.")
 
     # Step 5: Encryption
     print()
@@ -180,10 +223,34 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
     print(f"Config saved: {config_path}")
     print(f"  {len(selected_targets)} scan targets")
     print(f"  {total_files:,} artifacts ready for tiering")
+
+    # Step 7: Run initial tiering if user opted in
+    if run_initial_tier:
+        print()
+        print("Running initial tiering...")
+        from .engine import TieringEngine
+        engine = TieringEngine(config)
+        discovered = engine.scan()
+        engine.register_all(discovered)
+        actions = engine.evaluate_and_tier()
+        if actions:
+            warm_count = sum(1 for a in actions if a.to_tier == "warm")
+            cold_count = sum(1 for a in actions if a.to_tier == "cold")
+            total_saved = sum(a.original_size - a.new_size for a in actions if not a.dry_run)
+            print(f"  Tiered {len(actions)} artifacts:")
+            if warm_count:
+                print(f"    → Warm: {warm_count}")
+            if cold_count:
+                print(f"    → Cold: {cold_count}")
+            print(f"  Space saved: {_format_size(total_saved)}")
+        else:
+            print("  No transitions needed.")
+
     print()
     print("Next steps:")
-    print(f"  engram run --dry-run   # Preview tier transitions")
-    print(f"  engram run             # Execute tiering")
+    if not run_initial_tier:
+        print(f"  engram run --dry-run   # Preview tier transitions")
+        print(f"  engram run             # Execute tiering")
     print(f"  engram status          # Check tier distribution")
 
     return config
@@ -257,6 +324,38 @@ def run_interactive_setup(config_path: Path) -> EngineConfig:
     print(f"  engram run             # Execute")
 
     return config
+
+
+def _analyze_file_ages(targets: list[ScanTarget], policy: TierPolicy) -> dict:
+    """Analyze file ages to predict tier distribution before running."""
+    import time
+    counts = {"hot": 0, "warm": 0, "cold": 0, "frozen": 0}
+    skip = {".zst", ".age", ".tmp", ".parquet"}
+
+    for t in targets:
+        base = t.resolve()
+        if not base.exists():
+            continue
+        pattern = f"**/{t.pattern}" if t.recursive else t.pattern
+        for match in base.glob(pattern):
+            if match.is_file() and not match.is_symlink() and match.suffix not in skip:
+                try:
+                    stat = match.stat()
+                    age_h = (time.time() - stat.st_ctime) / 3600
+                    idle_h = (time.time() - stat.st_atime) / 3600
+
+                    if age_h >= policy.cold_to_frozen_age_hours and idle_h >= policy.cold_to_frozen_idle_hours:
+                        counts["frozen"] += 1
+                    elif age_h >= policy.warm_to_cold_age_hours and idle_h >= policy.warm_to_cold_idle_hours:
+                        counts["cold"] += 1
+                    elif age_h >= policy.hot_to_warm_age_hours and idle_h >= policy.hot_to_warm_idle_hours:
+                        counts["warm"] += 1
+                    else:
+                        counts["hot"] += 1
+                except OSError:
+                    counts["hot"] += 1
+
+    return counts
 
 
 def _configure_thresholds() -> TierPolicy:
