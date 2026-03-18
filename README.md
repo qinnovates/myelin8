@@ -2,7 +2,7 @@
 
 **Architecting Brain's Memory To Solve AI Context Persistence**
 
-*A Semantic Indexing, KV Caching, and Lookup Tables approach for AI Memory.*
+*A security engineer's approach to tackling AI context persistence and hardware constraints by modeling how the human brain stores and retrieves memory.*
 
 AI context windows have a hard limit. Fill it up and the oldest memories fall off. Your assistant forgets what you told it last week.
 
@@ -30,6 +30,25 @@ WARM (1w)    ████████████                              3
 COLD (1mo)   ██████                                    150 KB   8-12x   ~500ms
 FROZEN (3mo) ██                                        50 KB   20-50x   ~5s
 ```
+
+### Least Privilege by Design
+
+The tiered architecture isn't just compression. It's the principle of least privilege applied to AI context.
+
+Traditional least privilege: a user only gets the permissions they need for the current task. Engram least privilege: the AI only gets the context fidelity it needs for the current task.
+
+| Tier | Access Level | What the AI Sees | Analogy |
+|------|-------------|-----------------|---------|
+| **Hot** | Full access | Complete session content, every token | Root access — current working set |
+| **Warm** | Summaries | Key decisions, outcomes, compressed context | Read access — recent history |
+| **Cold** | Keywords only | Semantic index entries, topic references | Directory listing — you know it exists |
+| **Frozen** | Explicit recall required | Nothing until `engram recall` is invoked | Locked vault — must request access |
+
+The constraint is real: the context window is finite. The enforcement is real: compression removes detail until you explicitly ask for it back. Old context doesn't linger at full fidelity. It compresses, indexes, and locks down — the same way a well-run system revokes elevated permissions after the task is done.
+
+This means a compromised or misbehaving AI session can't silently access months of full-fidelity conversation history. It gets summaries and keywords. Full recall requires an explicit action (`engram recall <path>`) that can be logged, rate-limited, or gated behind encryption. The blast radius of any single session is bounded by its tier.
+
+Add post-quantum encryption and the tiers become actual access barriers: even with disk access, frozen artifacts are ML-KEM-768 encrypted with per-artifact keys managed by a Rust sidecar that never lets private keys enter Python's address space.
 
 ---
 
@@ -68,7 +87,6 @@ engram status                            # tier distribution
 ### Enable encryption
 
 ```bash
-brew install age                                  # PQ encryption tool
 cd engram/sidecar && cargo build --release        # build crypto sidecar
 engram encrypt-setup                              # generate keys + store in Keychain
 ```
@@ -113,7 +131,7 @@ Not just "higher zstd levels" (that gets 3.2x to 3.8x). Each tier applies differ
 
 Optional. Engram works without it — compression, indexing, and context enhancement all function with zero encryption.
 
-When enabled, uses **ML-KEM-768** (NIST FIPS 203, August 2024) in hybrid mode with X25519 via `age`. Same algorithm OpenSSH 10.0 made the default (April 2025).
+When enabled, uses **ML-KEM-768** (NIST FIPS 203) in hybrid mode with X25519, using AES-256-GCM (NIST FIPS 197) for data encryption and HKDF-SHA256 (NIST SP 800-56C) for key derivation.
 
 ### Crypto sidecar (engram-vault)
 
@@ -122,11 +140,26 @@ Private keys are handled by a compiled **Rust binary** — not Python. Keys neve
 | Protection | How |
 |-----------|-----|
 | Keys out of Python | Rust sidecar is the crypto boundary |
-| Keys off disk | Keychain → mlock'd memory → age stdin pipe |
+| Keys off disk | OS credential vault → mlock'd memory → in-process crypto → zeroed |
 | Keys out of swap | `mlockall()` at startup |
 | Keys out of core dumps | `setrlimit(RLIMIT_CORE, 0)` |
 | Keys out of logs | Regex PII detector blocks secrets before writing |
 | No env hijack | `.env_clear()` on all subprocess calls |
+| Zeroize on all paths | `Zeroizing<T>` wrappers on all key material — errors, panics, normal exit |
+
+### Key material lifecycle
+
+Private keys are **never** stored as environment variables and **never** passed over any wire or socket.
+
+| Step | What happens |
+|------|-------------|
+| **1. Storage** | Private keys live in your OS credential vault — macOS Keychain (encrypted by the OS, protected by login password/Touch ID), Windows Credential Manager (DPAPI-backed), or Linux `libsecret`/GNOME Keyring. The vault encrypts keys at rest using OS-level protections. |
+| **2. Retrieval** | The Rust sidecar calls the OS credential API (Security.framework on macOS) to read the key directly into its own `mlock`'d memory. No intermediate files, no pipes, no env vars. |
+| **3. Usage** | Key material stays in-process only. Used for ML-KEM-768 decapsulation + X25519 Diffie-Hellman + HKDF-SHA256 key derivation + AES-256-GCM encrypt/decrypt. All NIST-approved algorithms. |
+| **4. Cleanup** | `Zeroizing<Vec<u8>>` wrappers (RustCrypto `zeroize` crate) ensure deterministic zeroing on ALL exit paths — normal return, error return, and panic. Compiler barriers prevent the optimizer from eliding the zeroing. This satisfies NIST SP 800-57 Part 1 Section 8.3 key destruction requirements. |
+| **5. Never** | Touches disk. Enters Python. Appears in process args. Passes through env vars. Goes over any wire or socket. Gets logged. Hits swap (`mlockall`). Appears in core dumps (`RLIMIT_CORE=0`). |
+
+The Python side only ever sees the **public key** (for encryption). The sidecar is the crypto boundary.
 
 ### Two modes
 
@@ -171,10 +204,11 @@ engram/
 │   └── plugin.json                # Anthropic marketplace manifest
 ├── .github/workflows/
 │   └── ci.yml                     # GitHub Actions (pytest on push)
-├── sidecar/                       # Rust crypto sidecar (364 KB binary)
+├── sidecar/                       # Rust crypto sidecar (459 KB binary)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs                # mlock, zeroize, core dump disabled, env cleared
+│       ├── crypto.rs              # ML-KEM-768 + X25519 + AES-256-GCM (NIST-only)
 │       └── keychain.rs            # macOS Security.framework integration
 ├── src/
 │   ├── engine.py                  # Orchestrator (scan → index → tier → recall)
@@ -223,7 +257,7 @@ engram/
 
 ## Security
 
-- 9 rounds of security review (red team, crypto, GRC, supply chain, OWASP, embedding injection, index encryption, lookup table integrity, hybrid search fuzzing)
+- 10 rounds of security review (red team, crypto, GRC, supply chain, OWASP, embedding injection, index encryption, lookup table integrity, hybrid search fuzzing)
 - Rust crypto sidecar — keys never in Python
 - PQ encryption (ML-KEM-768 + X25519 hybrid)
 - Per-artifact DEKs in envelope mode
@@ -306,7 +340,6 @@ Setup modes: `engram init` (guided), `--mode interactive` (pick locations), `--m
 - Python 3.10+
 - `zstandard` >= 0.19.0 (auto-installed)
 - `pyarrow` >= 14.0.0 (auto-installed, for frozen Parquet tier)
-- `age` >= 1.3.0 (optional, for PQ encryption) — `brew install age`
 - Rust toolchain (optional, to build the crypto sidecar) — `brew install rust` (macOS) or see [rustup.rs](https://rustup.rs)
 
 ---
@@ -317,7 +350,7 @@ Setup modes: `engram init` (guided), `--mode interactive` (pick locations), `--m
 
 **Data handling.** Engram compresses and optionally encrypts files on your local filesystem. Compression transformations (JSON minification, boilerplate stripping) are lossy for whitespace. Full semantic content is preserved and recoverable via `engram recall`, but byte-for-byte identity with the original file is not guaranteed after tiering.
 
-**Encryption limitations.** If you lose your private key, encrypted data is unrecoverable. There is no backdoor, no recovery mechanism, no reset. The encryption is only as strong as your key management. The `age` tool's PQ hybrid (ML-KEM-768) has not received a published independent audit specific to the post-quantum integration; the classical X25519 + ChaCha20-Poly1305 layer was audited by Cure53 (2019).
+**Encryption limitations.** If you lose your private key, encrypted data is unrecoverable. There is no backdoor, no recovery mechanism, no reset. The encryption is only as strong as your key management. The Rust crypto sidecar uses the ml-kem (v0.2, RustCrypto), aes-gcm (v0.10, RustCrypto), and x25519-dalek (v2) crates. These crates have not received a combined independent audit specific to this integration.
 
 **Not a certified security product.** Engram has been reviewed through multiple rounds of automated security analysis but has not been formally audited by an independent security firm, is not FIPS-validated, and does not hold any compliance certifications. It is not a substitute for an HSM, a certified KMS, or a CMVP-validated crypto module.
 
