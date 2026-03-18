@@ -20,12 +20,12 @@ from typing import Optional
 
 
 # --- Default thresholds (in hours) ---
-DEFAULT_HOT_TO_WARM_AGE_HOURS = 48       # 2 days without access -> warm
-DEFAULT_WARM_TO_COLD_AGE_HOURS = 336     # 14 days without access -> cold
-DEFAULT_COLD_TO_FROZEN_AGE_HOURS = 2160  # 90 days without access -> frozen
-DEFAULT_HOT_TO_WARM_IDLE_HOURS = 24      # no access in 24h -> eligible for warm
-DEFAULT_WARM_TO_COLD_IDLE_HOURS = 168    # no access in 7d -> eligible for cold
-DEFAULT_COLD_TO_FROZEN_IDLE_HOURS = 720  # 30d idle -> eligible for frozen
+DEFAULT_HOT_TO_WARM_AGE_HOURS = 168      # 1 week old -> warm
+DEFAULT_WARM_TO_COLD_AGE_HOURS = 720     # 1 month old -> cold
+DEFAULT_COLD_TO_FROZEN_AGE_HOURS = 2160  # 3 months old -> frozen
+DEFAULT_HOT_TO_WARM_IDLE_HOURS = 72      # 3 days idle -> eligible for warm
+DEFAULT_WARM_TO_COLD_IDLE_HOURS = 336    # 2 weeks idle -> eligible for cold
+DEFAULT_COLD_TO_FROZEN_IDLE_HOURS = 720  # 1 month idle -> eligible for frozen
 
 # --- Compression levels (zstd) ---
 WARM_COMPRESSION_LEVEL = 3   # balanced: ~3.2x ratio, fast

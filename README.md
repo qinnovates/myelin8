@@ -10,9 +10,9 @@ Engram applies this to your AI's *memory*. Four compression tiers, a searchable 
 
 ```
 HOT (now)    ████████████████████████████████████████  1,500 KB   1x    instant
-WARM (2d)    ████████████                              340 KB   4-5x    ~10ms
-COLD (14d)   ██████                                    150 KB   8-12x   ~500ms
-FROZEN (90d) ██                                        50 KB   20-50x   ~5s
+WARM (1w)    ████████████                              340 KB   4-5x    ~10ms
+COLD (1mo)   ██████                                    150 KB   8-12x   ~500ms
+FROZEN (3mo) ██                                        50 KB   20-50x   ~5s
 ```
 
 ---
@@ -65,9 +65,9 @@ engram encrypt-setup                              # generate keys + store in Key
 
 | Transition | When | Pipeline | Ratio |
 |-----------|------|----------|-------|
-| Hot → Warm | 48h old + 24h idle | Minify JSON → zstd-3 | 4-5x |
-| Warm → Cold | 14d old + 7d idle | Strip boilerplate → dict-trained zstd-9 | 8-12x |
-| Cold → Frozen | 90d old + 30d idle | Columnar Parquet + dict + zstd-19 | 20-50x |
+| Hot → Warm | 1 week old + 3 days idle | Minify JSON → zstd-3 | 4-5x |
+| Warm → Cold | 1 month old + 2 weeks idle | Strip boilerplate → dict-trained zstd-9 | 8-12x |
+| Cold → Frozen | 3 months old + 1 month idle | Columnar Parquet + dict + zstd-19 | 20-50x |
 
 All thresholds configurable. Choose 2-tier (simple) or 4-tier (full) during setup.
 

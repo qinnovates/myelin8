@@ -35,7 +35,7 @@ engram run
 # Check the results
 engram status
 ```
-**What it does:** Files older than 48h get minified + compressed (warm, 4-5x). Files older than 14d get boilerplate-stripped + dictionary-compressed (cold, 8-12x). Files older than 90d get converted to columnar Parquet (frozen, 20-50x). Recent files stay untouched.
+**What it does:** Files older than 1 week get minified + compressed (warm, 4-5x). Files older than 1 month get boilerplate-stripped + dictionary-compressed (cold, 8-12x). Files older than 3 months get converted to columnar Parquet (frozen, 20-50x). Recent files stay untouched.
 
 ### 3. Search past conversations
 ```bash
@@ -108,7 +108,7 @@ cat ~/.engram/config.json
   }
 }
 ```
-**What it does:** Moves artifacts faster (24h instead of 48h to warm) or slower. Set any threshold to match your workflow. Aggressive for disk savings, conservative for fast access.
+**What it does:** Moves artifacts faster or slower than defaults (1 week to warm, 1 month to cold, 3 months to frozen). Set any threshold to match your workflow.
 
 ### 10. Enable most secure mode (encrypt everything including hot)
 ```bash

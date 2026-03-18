@@ -159,22 +159,22 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
     tier_choice = _input_choice("  Choose [2/4]: ", ["2", "4"], default="4")
 
     if tier_choice == "2":
-        # Simple: skip warm, go straight to cold at 48h
+        # Simple: skip warm, go straight to cold at 1 week
         policy = TierPolicy(
             hot_to_warm_age_hours=0,
             hot_to_warm_idle_hours=0,
-            warm_to_cold_age_hours=48,
-            warm_to_cold_idle_hours=24,
+            warm_to_cold_age_hours=168,   # 1 week
+            warm_to_cold_idle_hours=72,   # 3 days
             cold_to_frozen_age_hours=99999,  # effectively disabled
             cold_to_frozen_idle_hours=99999,
         )
-        print("  Using 2-tier mode: Hot → Cold (48h old + 24h idle)")
+        print("  Using 2-tier mode: Hot → Cold (1 week old + 3 days idle)")
     else:
         print()
         print("Tier thresholds (when memories move to deeper storage):")
-        print("  Hot → Warm:    48 hours old + 24 hours idle")
-        print("  Warm → Cold:   14 days old + 7 days idle")
-        print("  Cold → Frozen: 90 days old + 30 days idle")
+        print("  Hot → Warm:    1 week old + 3 days idle")
+        print("  Warm → Cold:   1 month old + 2 weeks idle")
+        print("  Cold → Frozen: 3 months old + 1 month idle")
         print()
 
         if _input_yn("Use recommended thresholds?"):
