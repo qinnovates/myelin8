@@ -564,7 +564,7 @@ class EnvelopeEncryptor:
     def store_private_key_in_keychain(
         private_key: str,
         tier: str,
-        service: str = "tiered-memory",
+        service: str = "engram",
     ) -> str:
         """
         Store a private key in macOS Keychain.
@@ -581,7 +581,7 @@ class EnvelopeEncryptor:
 
         Returns:
             The private_key_source string to put in config
-            (e.g., "keychain:tiered-memory:warm").
+            (e.g., "keychain:engram:warm").
         """
         account = f"{tier}-key"
 
@@ -620,7 +620,7 @@ class EnvelopeEncryptor:
 
     @classmethod
     def setup_tier_with_keychain(
-        cls, tier: str, service: str = "tiered-memory"
+        cls, tier: str, service: str = "engram"
     ) -> tuple[str, str]:
         """
         Full setup: generate keypair and store private key in macOS Keychain.

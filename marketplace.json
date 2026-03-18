@@ -1,5 +1,5 @@
 {
-  "name": "tiered-memory-engine",
+  "name": "engram",
   "owner": {
     "name": "Kevin Qi",
     "url": "https://github.com/qinnovates"
@@ -7,7 +7,7 @@
   "metadata": {
     "description": "Brain-inspired tiered memory compression that extends AI context windows 3-4x with optional post-quantum encryption. Automatic hot/warm/cold/frozen storage tiers, semantic indexing for instant search, progressive recall, and per-artifact envelope encryption using ML-KEM-768 (NIST FIPS 203).",
     "version": "0.1.0",
-    "repository": "https://github.com/qinnovates/tiered-memory-engine",
+    "repository": "https://github.com/qinnovates/engram",
     "license": "MIT",
     "categories": [
       "memory",
@@ -25,7 +25,7 @@
   },
   "plugins": [
     {
-      "name": "tiered-memory-engine",
+      "name": "engram",
       "description": "Tiered memory compression with context enhancement and PQ encryption",
       "source": "./"
     }

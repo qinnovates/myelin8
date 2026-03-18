@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
-name = "tiered-memory-engine"
+name = "engram"
 version = "0.1.0"
 description = "AI-agnostic tiered memory compression with optional post-quantum encryption"
 requires-python = ">=3.10"
@@ -23,7 +23,7 @@ minimal = [
 ]
 
 [project.scripts]
-tiered-memory = "src.cli:main"
+engram = "src.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

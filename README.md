@@ -1,10 +1,10 @@
-# tiered-memory-engine
+# Engram
 
 An AI-agnostic plugin that increases your assistant's effective context window through automatic tiered compression of memory artifacts, with optional post-quantum encryption.
 
 Every AI assistant session generates artifacts: conversation logs, memory files, task caches, subagent outputs. These pile up fast. A 128K token context window fills in a few sessions. Older memories get dropped. Your assistant forgets things you told it last week.
 
-tiered-memory-engine solves this the same way your brain does.
+engram solves this the same way your brain does.
 
 ---
 
@@ -117,17 +117,17 @@ Set any threshold to `0` to disable that condition. Set age thresholds only for 
 
 ### What triggers the check
 
-Tiering runs when you execute `tiered-memory run`. You can automate this with a cron job, a Claude Code hook, or any scheduler. It's not a daemon — it's a single-pass scan-evaluate-compress cycle.
+Tiering runs when you execute `engram run`. You can automate this with a cron job, a Claude Code hook, or any scheduler. It's not a daemon — it's a single-pass scan-evaluate-compress cycle.
 
 ```bash
 # Manual run
-tiered-memory run
+engram run
 
 # Preview without changing anything
-tiered-memory run --dry-run
+engram run --dry-run
 
 # Automate (cron, every 6 hours)
-0 */6 * * * cd /path/to/project && tiered-memory run
+0 */6 * * * cd /path/to/project && engram run
 ```
 
 ---
@@ -203,7 +203,7 @@ Every conversation you have with an AI assistant, every memory it stores, every 
 
 Without encryption, this data sits in plaintext files on your disk. Anyone with access to your machine — a stolen laptop, a compromised backup, a shared server — can read every session you've ever had.
 
-With tiered-memory-engine's encryption enabled:
+With engram's encryption enabled:
 
 - **Every artifact gets its own unique encryption key** (256-bit DEK). Compromising one file doesn't expose the others.
 - **Each tier has independent keypairs.** Compromising your warm-tier key doesn't unlock cold or frozen data.
@@ -227,7 +227,7 @@ The risk is "harvest now, decrypt later" — an adversary captures your encrypte
 
 ### Why introduce legacy encryption before the deadline when you can start with post-quantum now?
 
-tiered-memory-engine uses **ML-KEM-768** (NIST [FIPS 203](https://csrc.nist.gov/pubs/fips/203/final), finalized August 2024) — the NIST-standardized post-quantum Key Encapsulation Mechanism. It provides Category 3 security (~AES-192 equivalent) against both classical and quantum computers.
+engram uses **ML-KEM-768** (NIST [FIPS 203](https://csrc.nist.gov/pubs/fips/203/final), finalized August 2024) — the NIST-standardized post-quantum Key Encapsulation Mechanism. It provides Category 3 security (~AES-192 equivalent) against both classical and quantum computers.
 
 age v1.3.0+ implements ML-KEM-768 in **hybrid mode with X25519**: your data is protected by two independent algorithms simultaneously. Even if lattice-based cryptography is somehow broken in the future, the classical X25519 layer still holds. Even if a quantum computer breaks X25519, the ML-KEM-768 layer still holds. Both must fail for the encryption to break.
 
@@ -247,7 +247,7 @@ Post-quantum encryption protects the algorithm. Key management protects the key.
 
 ## What makes this different from other plugins
 
-| Feature | tiered-memory-engine | Typical memory plugin |
+| Feature | engram | Typical memory plugin |
 |---------|---------------------|----------------------|
 | Compression | 4-tier automatic (hot/warm/cold/frozen) with production-grade zstd | None or simple gzip |
 | Encryption | Post-quantum (ML-KEM-768) with per-artifact keys and envelope encryption | None, or single-key AES |
@@ -266,40 +266,40 @@ Post-quantum encryption protects the algorithm. Key management protects the key.
 
 ```bash
 # From the marketplace (when published)
-claude plugin install tiered-memory-engine
+claude plugin install engram
 
 # Or from GitHub directly
-claude --plugin-dir /path/to/tiered-memory-engine
+claude --plugin-dir /path/to/engram
 
 # Or install the Python package standalone
 pip install -e .
 
 # Initialize config (auto-detects Claude, ChatGPT, Cursor, Copilot artifacts)
-tiered-memory init
+engram init
 
 # Scan — see what artifacts exist on your system
-tiered-memory scan
+engram scan
 
 # Preview what would be tiered (safe, no changes)
-tiered-memory run --dry-run
+engram run --dry-run
 
 # Run tiering
-tiered-memory run
+engram run
 
 # Check status
-tiered-memory status
+engram status
 
 # Get context-optimized memory for your AI session
-tiered-memory context --query "your current task"
+engram context --query "your current task"
 
 # Search memories across all tiers (uses the index, no decompression)
-tiered-memory search "keyword"
+engram search "keyword"
 
 # Recall a specific artifact back to hot tier
-tiered-memory recall /path/to/original/file
+engram recall /path/to/original/file
 
 # Set up post-quantum encryption
-tiered-memory encrypt-setup
+engram encrypt-setup
 ```
 
 ### Enable encryption (one command, Touch ID)
@@ -324,11 +324,11 @@ You've been building a project for 6 months. You have 400+ conversation logs, me
 
 ```bash
 # Initial setup — takes 30 seconds
-tiered-memory init
-tiered-memory run
+engram init
+engram run
 
 # Now at session start, ask your AI for relevant context
-tiered-memory context --query "authentication refactor we discussed in January"
+engram context --query "authentication refactor we discussed in January"
 
 # Output: summaries of 3 matching sessions from cold tier,
 # plus 2 related memory files from warm tier.
@@ -352,7 +352,7 @@ for tier in ['warm', 'cold']:
 "
 
 # Enable encryption in config, then run
-tiered-memory run
+engram run
 
 # Every compressed artifact now has:
 # - Its own unique 256-bit encryption key
@@ -369,10 +369,10 @@ Your team runs Claude Code on a shared dev server. Each person's sessions pile u
 ```bash
 # Automate with cron — tier every 6 hours
 crontab -e
-# Add: 0 */6 * * * cd /path/to/project && tiered-memory run
+# Add: 0 */6 * * * cd /path/to/project && engram run
 
 # Anyone on the team can search all past sessions
-tiered-memory search "database migration strategy"
+engram search "database migration strategy"
 # Returns: relevant sessions from any team member, ranked by relevance
 ```
 
@@ -384,9 +384,9 @@ You use Claude Code across 5 projects. Each project has its own memory directory
 
 ```bash
 # Add all project memory dirs to config.json scan_targets
-tiered-memory init  # starts with Claude defaults
+engram init  # starts with Claude defaults
 
-# Edit ~/.tiered-memory/config.json to add custom paths:
+# Edit ~/.engram/config.json to add custom paths:
 # "scan_targets": [
 #   {"path": "~/projects/webapp/.claude/memory", "pattern": "**/*"},
 #   {"path": "~/projects/api/.claude/memory", "pattern": "**/*"},
@@ -394,8 +394,8 @@ tiered-memory init  # starts with Claude defaults
 # ]
 
 # Search across all projects
-tiered-memory search "rate limiting implementation"
-tiered-memory context --query "how did we handle auth across projects"
+engram search "rate limiting implementation"
+engram context --query "how did we handle auth across projects"
 ```
 
 **Result:** Cross-project memory search. Your AI can recall that you solved rate limiting in the API project and apply the same pattern to the webapp — without you remembering which project it was in.
@@ -405,7 +405,7 @@ tiered-memory context --query "how did we handle auth across projects"
 You've been coding with AI for 2 years. Early sessions contain foundational decisions you've forgotten. Without tiering, these files sit uncompressed and unsearchable. With tiering:
 
 ```bash
-tiered-memory status
+engram status
 # Tiered Memory Status
 # ========================================
 # Total artifacts:   2,847
@@ -421,7 +421,7 @@ tiered-memory status
 # Total keywords:    18,429
 
 # Recall a specific frozen artifact about early architecture decisions
-tiered-memory recall ~/.claude/subagents/session-2024-05-12.jsonl
+engram recall ~/.claude/subagents/session-2024-05-12.jsonl
 # Takes ~3 seconds (frozen tier), but the full session is back in hot tier
 ```
 
@@ -444,12 +444,12 @@ tiered-memory recall ~/.claude/subagents/session-2024-05-12.jsonl
 This project follows the official Anthropic Claude Code plugin specification:
 
 ```
-tiered-memory-engine/
+engram/
 ├── .claude-plugin/
 │   └── plugin.json              # Plugin manifest (name, version, author)
 ├── marketplace.json             # Marketplace distribution metadata
 ├── skills/
-│   └── tiered-memory/
+│   └── engram/
 │       └── SKILL.md             # Skill definition with frontmatter
 ├── hooks/
 │   └── hooks.json               # SessionStart + PreCompact hooks
@@ -473,7 +473,7 @@ tiered-memory-engine/
 
 **Hooks:** On `SessionStart`, the plugin auto-loads relevant memory context. On `PreCompact`, it checks if any artifacts should be tiered down.
 
-**Skill:** Invocable as `/tiered-memory` in Claude Code. Auto-triggers on keywords like "compress memories", "search past sessions", "encrypt AI data".
+**Skill:** Invocable as `/engram` in Claude Code. Auto-triggers on keywords like "compress memories", "search past sessions", "encrypt AI data".
 
 ## Architecture
 

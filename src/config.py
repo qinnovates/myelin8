@@ -1,5 +1,5 @@
 """
-Configuration schema and defaults for tiered-memory-engine.
+Configuration schema and defaults for engram.
 
 Tier model (inspired by Splunk SmartStore + Elasticsearch ILM):
   HOT  -> no compression, immediate access
@@ -186,7 +186,7 @@ class EngineConfig:
     tier_policy: TierPolicy = field(default_factory=TierPolicy)
     encryption: EncryptionConfig = field(default_factory=EncryptionConfig)
     # Where to store tier metadata (access times, tier state)
-    metadata_dir: str = "~/.tiered-memory"
+    metadata_dir: str = "~/.engram"
     # Dry run mode — report what would happen without changing files
     dry_run: bool = False
     # Verbose output
@@ -292,7 +292,7 @@ class EngineConfig:
             scan_targets=targets,
             tier_policy=policy,
             encryption=encryption,
-            metadata_dir=data.get("metadata_dir", "~/.tiered-memory"),
+            metadata_dir=data.get("metadata_dir", "~/.engram"),
             dry_run=data.get("dry_run", False),
             verbose=data.get("verbose", False),
         )

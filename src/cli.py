@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-CLI for tiered-memory-engine.
+CLI for engram-engine.
 
 Usage:
-  tiered-memory run [--config PATH] [--dry-run] [--verbose]
-  tiered-memory status [--config PATH]
-  tiered-memory recall <file> [--config PATH]
-  tiered-memory init [--config PATH]
-  tiered-memory scan [--config PATH]
-  tiered-memory encrypt-setup
+  engram run [--config PATH] [--dry-run] [--verbose]
+  engram status [--config PATH]
+  engram recall <file> [--config PATH]
+  engram init [--config PATH]
+  engram scan [--config PATH]
+  engram encrypt-setup
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from .engine import TieringEngine
 from .encryption import check_age_installed, AgeNotFoundError
 
 
-DEFAULT_CONFIG = "~/.tiered-memory/config.json"
+DEFAULT_CONFIG = "~/.engram/config.json"
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -182,7 +182,7 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
     print()
     print("Step 1: Generate an age keypair")
     print("-" * 40)
-    print("  age-keygen -o ~/.tiered-memory/key.txt")
+    print("  age-keygen -o ~/.engram/key.txt")
     print()
     print("  This creates a private key (AGE-SECRET-KEY-...) and prints")
     print("  the public key (age1...). The public key goes in your config.")
@@ -194,11 +194,11 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
     print()
     print("Step 3: Update your config")
     print("-" * 40)
-    print('  In ~/.tiered-memory/config.json, set:')
+    print('  In ~/.engram/config.json, set:')
     print('  "encryption": {')
     print('    "enabled": true,')
     print('    "recipient_pubkey": "age1your-public-key-here",')
-    print('    "identity_path": "~/.tiered-memory/key.txt"')
+    print('    "identity_path": "~/.engram/key.txt"')
     print('  }')
     print()
     print("IMPORTANT: The identity_path should point to your key or to a")
@@ -208,7 +208,7 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="tiered-memory",
+        prog="engram",
         description="AI-agnostic tiered memory compression with optional PQKC encryption",
     )
     parser.add_argument(

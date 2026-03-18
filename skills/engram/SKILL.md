@@ -1,12 +1,12 @@
 ---
-name: tiered-memory
+name: engram
 description: Manage AI memory artifacts with tiered compression (hot/warm/cold/frozen), semantic search, progressive recall, and optional post-quantum encryption. Use when the user mentions memory management, context optimization, compressing old sessions, searching past conversations, recalling archived memories, encrypting AI data, or managing artifact storage.
-allowed-tools: Read, Bash(tiered-memory *), Bash(python3 -m src.cli *), Grep, Glob
+allowed-tools: Read, Bash(engram *), Bash(python3 -m src.cli *), Grep, Glob
 user-invocable: true
 argument-hint: "[command] [options]"
 ---
 
-# Tiered Memory Engine
+# Engram
 
 You are managing an AI memory tiering system. When invoked, help the user with memory compression, search, recall, encryption, and context optimization.
 
@@ -16,42 +16,42 @@ Run commands via the CLI:
 
 ```bash
 # Initialize config (auto-detects Claude, ChatGPT, Cursor, Copilot artifacts)
-tiered-memory init
+engram init
 
 # Scan for artifacts across all configured AI assistant locations
-tiered-memory scan
+engram scan
 
 # Preview tier transitions (safe, no changes)
-tiered-memory run --dry-run
+engram run --dry-run
 
 # Execute tiering (compress idle artifacts)
-tiered-memory run
+engram run
 
 # Show tier distribution and compression stats
-tiered-memory status
+engram status
 
 # Get context-optimized memory block for AI session injection
-tiered-memory context --query "$ARGUMENTS"
+engram context --query "$ARGUMENTS"
 
 # Search indexed memories across all tiers without decompressing
-tiered-memory search "$ARGUMENTS"
+engram search "$ARGUMENTS"
 
 # Recall a compressed artifact back to hot tier
-tiered-memory recall <file-path>
+engram recall <file-path>
 
 # Set up post-quantum encryption with Touch ID
-tiered-memory encrypt-setup
+engram encrypt-setup
 ```
 
 ## When to Use This Skill
 
-- **User says "compress old memories"** → run `tiered-memory run`
-- **User says "search memories for X"** → run `tiered-memory search "X"`
-- **User says "what do I have stored?"** → run `tiered-memory status`
-- **User says "load context about X"** → run `tiered-memory context --query "X"`
-- **User says "recall that old session"** → run `tiered-memory recall <path>`
-- **User says "encrypt my memories"** → run `tiered-memory encrypt-setup`
-- **User says "how much space am I using?"** → run `tiered-memory status`
+- **User says "compress old memories"** → run `engram run`
+- **User says "search memories for X"** → run `engram search "X"`
+- **User says "what do I have stored?"** → run `engram status`
+- **User says "load context about X"** → run `engram context --query "X"`
+- **User says "recall that old session"** → run `engram recall <path>`
+- **User says "encrypt my memories"** → run `engram encrypt-setup`
+- **User says "how much space am I using?"** → run `engram status`
 
 ## How Tiering Works
 
