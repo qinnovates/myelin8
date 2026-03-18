@@ -239,6 +239,29 @@ def cmd_verify(args: argparse.Namespace) -> None:
             print(f"    expected: {expected}...  {actual}")
 
 
+def cmd_lock(args: argparse.Namespace) -> None:
+    """Encrypt the index bundle (lock at session end)."""
+    config = EngineConfig.load(args.config)
+    if not config.encryption.enabled:
+        print("Encryption is not enabled. Nothing to lock.")
+        return
+    engine = TieringEngine(config)
+    engine.lock_index()
+    print("Index locked. All index files encrypted.")
+    print("Run `engram unlock` or any engram command to decrypt (Touch ID).")
+
+
+def cmd_unlock(args: argparse.Namespace) -> None:
+    """Decrypt the index bundle (unlock at session start)."""
+    config = EngineConfig.load(args.config)
+    if not config.encryption.enabled:
+        print("Encryption is not enabled. Nothing to unlock.")
+        return
+    # TieringEngine.__init__ auto-unlocks if locked
+    engine = TieringEngine(config)
+    print("Index unlocked. Ready for search, context, and tiering.")
+
+
 def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
     """Guide user through encryption setup."""
     print("=" * 60)
@@ -341,6 +364,8 @@ def main() -> None:
     sub.add_parser("verify", help="Verify SHA-256 integrity of tracked artifacts")
 
     # encrypt-setup
+    sub.add_parser("lock", help="Encrypt index bundle (session end)")
+    sub.add_parser("unlock", help="Decrypt index bundle (session start)")
     sub.add_parser("encrypt-setup", help="Guide through encryption setup")
 
     args = parser.parse_args()
@@ -355,6 +380,8 @@ def main() -> None:
         "search": cmd_search,
         "reindex": cmd_reindex,
         "verify": cmd_verify,
+        "lock": cmd_lock,
+        "unlock": cmd_unlock,
         "encrypt-setup": cmd_encrypt_setup,
     }
 

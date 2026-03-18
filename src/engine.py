@@ -138,6 +138,15 @@ class TieringEngine:
     def __init__(self, config: EngineConfig):
         self.config = config
         meta_dir = config.resolve_metadata_dir()
+
+        # Index encryption — unlock before loading any index files
+        self._index_crypto = None
+        if config.encryption.enabled:
+            from .index_crypto import IndexCrypto
+            self._index_crypto = IndexCrypto(meta_dir)
+            if self._index_crypto.is_locked():
+                self._index_crypto.unlock()
+
         self.metadata = MetadataStore(meta_dir)
         self.index = SemanticIndex(meta_dir)
         self.pipeline = CompressionPipeline(meta_dir)
@@ -147,6 +156,28 @@ class TieringEngine:
         if config.audit_log:
             from .audit import AuditLogger
             self._audit = AuditLogger(meta_dir)
+
+    def lock_index(self) -> None:
+        """Encrypt the index bundle. Call at session end.
+
+        Bundles all index files (semantic index, embeddings, HNSW graphs,
+        LSH tables, PQ codebook, registry, audit log, boilerplate cache)
+        into a single encrypted .age file. Plaintext deleted.
+
+        After locking, the index cannot be searched until unlock.
+        """
+        if self._index_crypto:
+            # Save all state before locking
+            self.metadata.save(force=True)
+            self.index.save(force=True)
+            self._index_crypto.lock()
+
+    def __del__(self) -> None:
+        """Auto-lock index on garbage collection if encryption is enabled."""
+        try:
+            self.lock_index()
+        except Exception:
+            pass  # Don't raise in __del__
 
     def _log(self, method: str, **kwargs) -> None:
         """Log an event if audit logging is enabled."""
