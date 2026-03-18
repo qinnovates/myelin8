@@ -1,0 +1,42 @@
+# Secrets — NEVER commit private keys
+key.txt
+key-*.txt
+identity.txt
+*.pem
+*.key
+.env*
+credentials.*
+*secret*
+
+# age encrypted key backups (not encrypted artifacts)
+key.txt.age
+
+# Envelope headers contain encrypted DEKs (safe to commit,
+# but local state — don't commit unless intentional)
+*.envelope.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+
+# Metadata store (local state, contains file hashes and paths)
+artifact-registry.json
+semantic-index.json
+config.json
+
+# IDE
+.vscode/
+.idea/
+
+# Local memory / session state
+_memory/
+
+# OS
+.DS_Store
+Thumbs.db
