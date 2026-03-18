@@ -207,15 +207,34 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
         default=False,
     )
 
+    encrypt_hot = False
     if encryption_enabled:
         print()
         print("  Encryption enabled. Run `engram encrypt-setup` after init")
         print("  to generate keypairs and store in Keychain.")
+        print()
+        print("  By default, only warm/cold/frozen tiers are encrypted.")
+        print("  Hot tier (active session files) stays plaintext for fast access.")
+        print()
+        encrypt_hot = _input_yn(
+            "  Also encrypt hot tier? (slower — requires Touch ID on every read)",
+            default=False,
+        )
+        if encrypt_hot:
+            print("    All tiers will be encrypted at rest.")
+        else:
+            print("    Hot stays plaintext. Old sessions encrypted when tiered.")
 
     # Step 6: Save
+    from .config import EncryptionConfig
+    enc_config = EncryptionConfig(
+        enabled=encryption_enabled,
+        encrypt_hot=encrypt_hot,
+    )
     config = EngineConfig(
         scan_targets=selected_targets,
         tier_policy=policy,
+        encryption=enc_config,
     )
     config.save(config_path)
 
