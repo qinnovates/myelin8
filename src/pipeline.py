@@ -508,9 +508,9 @@ class CompressionPipeline:
 
         # Atomic write with restricted permissions
         fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
+        os.fchmod(fd, 0o600)  # SECURITY: restrict BEFORE writing content
         with os.fdopen(fd, "wb") as f:
             f.write(compressed)
-        os.chmod(tmp, 0o600)
         Path(tmp).rename(output_path)
 
         return PipelineResult(
@@ -544,9 +544,9 @@ class CompressionPipeline:
         stages.append("dict-zstd-9" if dict_data else "zstd-9")
 
         fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
+        os.fchmod(fd, 0o600)  # SECURITY: restrict BEFORE writing content
         with os.fdopen(fd, "wb") as f:
             f.write(compressed)
-        os.chmod(tmp, 0o600)
         Path(tmp).rename(output_path)
 
         return PipelineResult(
@@ -615,9 +615,9 @@ class CompressionPipeline:
             stages.append("dict-zstd-19" if dict_data else "zstd-19")
 
             fd, tmp = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp")
+            os.fchmod(fd, 0o600)  # SECURITY: restrict BEFORE writing content
             with os.fdopen(fd, "wb") as f:
                 f.write(compressed)
-            os.chmod(tmp, 0o600)
             Path(tmp).rename(output_path)
 
             return PipelineResult(

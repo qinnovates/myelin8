@@ -27,6 +27,9 @@ from .encryption import EncryptionError
 # Path to the compiled sidecar binary
 _VAULT_BINARY_NAME = "engram-vault"
 
+# Allowed tier values — rejects anything else before it hits the protocol
+_VALID_TIERS = frozenset({"hot", "warm", "cold", "frozen", "index"})
+
 
 def _find_vault_binary() -> str:
     """Find and verify the engram-vault binary."""
@@ -122,6 +125,11 @@ class VaultClient:
                 f"Invalid {name} — paths with spaces are not supported "
                 f"in the sidecar protocol. Rename or symlink the file."
             )
+        # Tier allowlist — prevents protocol injection via crafted tier values
+        if name == "tier" and value not in _VALID_TIERS:
+            raise EncryptionError(
+                f"Invalid tier: {value!r}. Must be one of: {sorted(_VALID_TIERS)}"
+            )
 
     def encrypt(self, input_path: Path, output_path: Path, tier: str) -> None:
         """Encrypt a file using the tier's public key.
@@ -129,6 +137,9 @@ class VaultClient:
         Public key is retrieved from Keychain by the sidecar.
         No secret material involved on the Python side.
         """
+        # Canonicalize paths to prevent traversal (CWE-22)
+        input_path = Path(input_path).resolve()
+        output_path = Path(output_path).resolve()
         self._validate_input(str(input_path), "input_path")
         self._validate_input(str(output_path), "output_path")
         self._validate_input(tier, "tier")
@@ -147,6 +158,9 @@ class VaultClient:
         used for in-process ML-KEM + AES-256-GCM decryption,
         then zeroed via Zeroizing<T>. Python never sees it.
         """
+        # Canonicalize paths to prevent traversal (CWE-22)
+        input_path = Path(input_path).resolve()
+        output_path = Path(output_path).resolve()
         self._validate_input(str(input_path), "input_path")
         self._validate_input(str(output_path), "output_path")
         self._validate_input(tier, "tier")
@@ -183,6 +197,12 @@ class VaultClient:
                 pass
             self._proc.terminate()
             self._proc = None
+
+    def __enter__(self) -> "VaultClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def __del__(self) -> None:
         self.close()

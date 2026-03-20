@@ -716,10 +716,13 @@ class TieringEngine:
                     tier=meta.tier, path=str(original_path),
                 ) from e
 
-        # Decompress
+        # Decompress — always clean up decrypted intermediate on failure
         try:
             output = decompress_file(working_path, output_path=original_path)
         except (OSError, zstd.ZstdError) as e:
+            # Clean up decrypted intermediate to avoid plaintext leak (CWE-459)
+            if working_path != compressed and working_path.exists():
+                working_path.unlink()
             raise DecompressionError(
                 f"Failed to decompress {meta.tier}-tier artifact: {original_path}. "
                 f"The compressed file may be corrupted. Error: {type(e).__name__}",
@@ -730,8 +733,10 @@ class TieringEngine:
         if meta.sha256:
             restored_hash = compute_sha256(output)
             if restored_hash != meta.sha256:
-                # Remove the unverified output
+                # Remove the unverified output AND decrypted intermediate
                 output.unlink()
+                if working_path != compressed and working_path.exists():
+                    working_path.unlink()
                 raise IntegrityError(
                     f"Integrity check failed on recall: {original_path} "
                     f"(expected {meta.sha256[:16]}..., got {restored_hash[:16]}...)"

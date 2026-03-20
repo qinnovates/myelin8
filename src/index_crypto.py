@@ -58,13 +58,19 @@ INDEX_TIER = "hot"  # Use the hot tier key for index encryption
 
 
 class IndexCrypto:
-    """Encrypts and decrypts the Engram index bundle."""
+    """Encrypts and decrypts the Engram index bundle.
+
+    Registers an atexit handler on unlock to re-lock the index if the
+    process exits without explicit lock(). This closes the plaintext
+    exposure window (CWE-377) on crashes or unclean shutdowns.
+    """
 
     def __init__(self, engram_dir: Path):
         self.engram_dir = engram_dir
         self.bundle_path = engram_dir / INDEX_BUNDLE
         self.encrypted_path = engram_dir / INDEX_BUNDLE_ENCRYPTED
         self._vault = None
+        self._atexit_registered = False
 
     def _get_vault(self):
         """Lazy-load vault client."""
@@ -136,14 +142,30 @@ class IndexCrypto:
             bp_tar.unlink(missing_ok=True)
             shutil.rmtree(boilerplate_dir)
 
+    def _atexit_lock(self) -> None:
+        """Best-effort re-lock on process exit to minimize plaintext window."""
+        try:
+            if self.has_index_files():
+                self.lock()
+        except Exception:
+            pass  # atexit handlers must not raise
+
     def unlock(self) -> None:
         """Decrypt the index: decrypt .encf -> extract tarball -> index files restored.
 
         Call this at session start before any search, context, or tier operations.
         Requires Touch ID / vault access for the private key.
+
+        Registers an atexit handler to re-lock on unclean exit (CWE-377).
         """
         if not self.is_locked():
             return  # Already unlocked or never locked
+
+        # Register cleanup to minimize plaintext exposure on crash
+        if not self._atexit_registered:
+            import atexit
+            atexit.register(self._atexit_lock)
+            self._atexit_registered = True
 
         # Decrypt the bundle via sidecar
         vault = self._get_vault()
