@@ -12,9 +12,15 @@ ml-kem = { version = "0.2", features = ["zeroize"] }
 # AES-256-GCM (NIST FIPS 197 + SP 800-38D) — authenticated encryption
 aes-gcm = { version = "0.10", features = ["aes"] }
 
-# HKDF-SHA256 (NIST SP 800-56C) — key derivation
+# HKDF (NIST SP 800-56C) — key derivation
 hkdf = "0.12"
 sha2 = "0.10"
+
+# SHA3-256 (NIST FIPS 202) — post-quantum collision-resistant hashing for Merkle tree
+sha3 = "0.10"
+
+# HMAC (NIST FIPS 198-1) — Merkle root sealing with PQC-derived key
+hmac = "0.12"
 
 # X25519 for classical key agreement (hybrid with ML-KEM)
 x25519-dalek = { version = "2", features = ["static_secrets"] }

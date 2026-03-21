@@ -1,37 +1,46 @@
-//! Merkle tree — integrity verification in the trusted Rust boundary.
+//! Merkle tree — PQC-hardened integrity verification.
 //!
-//! All tree operations (add leaf, generate proof, verify proof, compute root)
-//! run inside the sidecar process. Python never sees intermediate hashes
-//! or proof computations — only the final results.
+//! Hash algorithm: SHA3-256 (NIST FIPS 202)
+//!   - 128-bit collision resistance post-quantum (vs SHA-256's ~64-bit)
+//!   - 256-bit preimage resistance post-quantum
+//!   - Sponge construction (independent of Merkle-Damgård, no length extension)
 //!
-//! SHA-256 with domain separation:
-//!   Leaf:     SHA-256(0x00 || data)
-//!   Internal: SHA-256(0x01 || left || right)
+//! Domain separation:
+//!   Leaf:     SHA3-256(0x00 || data)
+//!   Internal: SHA3-256(0x01 || left || right)
+//!   Prevents second-preimage attacks (RFC 6962 compliant).
 //!
-//! Compatible with RFC 6962 (Certificate Transparency) proof format.
-//! Constant-time comparison for verify (prevents timing side channels).
+//! Root sealing: HMAC-SHA3-256(root, pqc_derived_key)
+//!   - Key derived via HKDF from ML-KEM shared secret
+//!   - Proves the root was computed by a process with access to PQC key material
+//!   - Constant-time comparison on verify
+//!
+//! All operations run inside the sidecar process (mlocked, zero core dumps).
 
-use sha2::{Sha256, Digest};
+use sha3::{Sha3_256, Digest};
+use hmac::{Hmac, Mac};
+
+type HmacSha3 = Hmac<Sha3_256>;
 
 const LEAF_PREFIX: u8 = 0x00;
 const NODE_PREFIX: u8 = 0x01;
 
 fn hash_leaf(data: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
+    let mut hasher = Sha3_256::new();
     hasher.update([LEAF_PREFIX]);
     hasher.update(data);
     hasher.finalize().into()
 }
 
 fn hash_node(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
+    let mut hasher = Sha3_256::new();
     hasher.update([NODE_PREFIX]);
     hasher.update(left);
     hasher.update(right);
     hasher.finalize().into()
 }
 
-/// Constant-time comparison (prevents timing side channels on verify)
+/// Constant-time comparison (prevents timing side channels)
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -43,12 +52,13 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// In-memory Merkle tree with append, proof, and verify.
+/// PQC-hardened Merkle tree with SHA3-256 and HMAC root sealing.
 pub struct MerkleTree {
     leaves: Vec<[u8; 32]>,
-    /// Cached layers. layers[0] = leaves, layers[last] = [root]
     layers: Vec<Vec<[u8; 32]>>,
     dirty: bool,
+    /// HMAC seal of the root (set by seal_root)
+    root_seal: Option<[u8; 32]>,
 }
 
 impl MerkleTree {
@@ -57,6 +67,7 @@ impl MerkleTree {
             leaves: Vec::new(),
             layers: Vec::new(),
             dirty: true,
+            root_seal: None,
         }
     }
 
@@ -65,18 +76,20 @@ impl MerkleTree {
         let h = hash_leaf(data);
         self.leaves.push(h);
         self.dirty = true;
+        self.root_seal = None; // Seal invalidated
         self.leaves.len() - 1
     }
 
-    /// Add a pre-computed SHA-256 hash as a leaf (with domain separation).
+    /// Add a pre-computed SHA3-256 hash as a leaf (with domain separation).
     pub fn add_hash(&mut self, hash: &[u8; 32]) -> usize {
         let h = hash_leaf(hash);
         self.leaves.push(h);
         self.dirty = true;
+        self.root_seal = None;
         self.leaves.len() - 1
     }
 
-    /// Add a hex-encoded SHA-256 hash.
+    /// Add a hex-encoded hash (64 chars = 32 bytes).
     pub fn add_hex(&mut self, hex: &str) -> Result<usize, String> {
         let bytes = hex_decode(hex)?;
         if bytes.len() != 32 {
@@ -91,7 +104,7 @@ impl MerkleTree {
         self.leaves.len()
     }
 
-    /// Compute and return the root hash.
+    /// Compute and return the root hash (SHA3-256).
     pub fn root(&mut self) -> Option<[u8; 32]> {
         if self.leaves.is_empty() {
             return None;
@@ -102,6 +115,34 @@ impl MerkleTree {
 
     pub fn root_hex(&mut self) -> Option<String> {
         self.root().map(|r| hex_encode(&r))
+    }
+
+    /// Seal the root with HMAC-SHA3-256 using a PQC-derived key.
+    /// The key should come from HKDF(ML-KEM shared secret).
+    pub fn seal_root(&mut self, key: &[u8]) -> Result<String, String> {
+        let root = self.root().ok_or("Empty tree")?;
+        let mut mac = HmacSha3::new_from_slice(key)
+            .map_err(|_| "Invalid HMAC key")?;
+        mac.update(&root);
+        let seal: [u8; 32] = mac.finalize().into_bytes().into();
+        self.root_seal = Some(seal);
+        Ok(hex_encode(&seal))
+    }
+
+    /// Verify a root seal. Constant-time.
+    pub fn verify_seal(&mut self, key: &[u8], seal_hex: &str) -> Result<bool, String> {
+        let root = self.root().ok_or("Empty tree")?;
+        let expected = hex_decode(seal_hex)?;
+        if expected.len() != 32 {
+            return Err("Seal must be 64 hex chars".into());
+        }
+
+        let mut mac = HmacSha3::new_from_slice(key)
+            .map_err(|_| "Invalid HMAC key")?;
+        mac.update(&root);
+        let computed: [u8; 32] = mac.finalize().into_bytes().into();
+
+        Ok(ct_eq(&computed, &expected))
     }
 
     /// Generate a Merkle proof for the leaf at `index`.
@@ -123,7 +164,7 @@ impl MerkleTree {
             if sibling_idx < layer.len() {
                 siblings.push(layer[sibling_idx]);
             } else {
-                siblings.push(layer[idx]); // duplicate for odd trees
+                siblings.push(layer[idx]);
             }
             directions.push(dir.to_string());
             idx /= 2;
@@ -140,7 +181,7 @@ impl MerkleTree {
         })
     }
 
-    /// Verify a proof against a root hash. Constant-time comparison.
+    /// Verify a proof. Constant-time comparison.
     pub fn verify(proof: &MerkleProof) -> bool {
         let mut current = proof.leaf_hash;
 
@@ -155,14 +196,11 @@ impl MerkleTree {
         ct_eq(&current, &proof.root)
     }
 
-    // ── Internal ──
-
     fn rebuild(&mut self) {
         if !self.dirty || self.leaves.is_empty() {
             return;
         }
 
-        // Pad to next power of 2
         let n = self.leaves.len();
         let target = n.next_power_of_two().max(2);
         let mut padded = self.leaves.clone();
@@ -195,7 +233,6 @@ pub struct MerkleProof {
 }
 
 impl MerkleProof {
-    /// Serialize to protocol response string.
     pub fn to_response(&self) -> String {
         let siblings_hex: Vec<String> = self.siblings.iter().map(|s| hex_encode(s)).collect();
         format!(
@@ -209,7 +246,7 @@ impl MerkleProof {
     }
 }
 
-// ── Hex utilities (no external dep) ──
+// ── Hex utilities ──
 
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()

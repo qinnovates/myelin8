@@ -32,6 +32,8 @@
 //!   MERKLE_PROOF <leaf_index>           -> OK <leaf> <idx> <siblings> <dirs> <root>
 //!   MERKLE_VERIFY <leaf> <sibs|dirs> <root> -> OK true | OK false
 //!   MERKLE_COUNT                        -> OK <count>
+//!   MERKLE_SEAL <key_hex>                -> OK <seal_hex>
+//!   MERKLE_VERIFY_SEAL <key> <seal>      -> OK true | OK false
 //!   MERKLE_RESET                        -> OK
 //!   PING                                -> PONG
 //!   QUIT                                -> BYE
@@ -173,6 +175,36 @@ fn main() {
             "MERKLE_COUNT" => {
                 format!("OK {}", with_merkle(|t| t.leaf_count()))
             }
+            "MERKLE_SEAL" => {
+                // MERKLE_SEAL <key_hex> — seal root with HMAC-SHA3-256(root, key)
+                if parts.len() < 2 {
+                    "ERROR Usage: MERKLE_SEAL <key_hex>".to_string()
+                } else {
+                    let key = match hex_decode_vec(parts[1]) {
+                        Ok(k) => k,
+                        Err(e) => { let _ = writeln!(stdout, "ERROR {}", e); let _ = stdout.flush(); continue; }
+                    };
+                    match with_merkle(|t| t.seal_root(&key)) {
+                        Ok(seal) => format!("OK {}", seal),
+                        Err(e) => format!("ERROR {}", e),
+                    }
+                }
+            }
+            "MERKLE_VERIFY_SEAL" => {
+                // MERKLE_VERIFY_SEAL <key_hex> <seal_hex>
+                if parts.len() < 3 {
+                    "ERROR Usage: MERKLE_VERIFY_SEAL <key_hex> <seal_hex>".to_string()
+                } else {
+                    let key = match hex_decode_vec(parts[1]) {
+                        Ok(k) => k,
+                        Err(e) => { let _ = writeln!(stdout, "ERROR {}", e); let _ = stdout.flush(); continue; }
+                    };
+                    match with_merkle(|t| t.verify_seal(&key, parts[2])) {
+                        Ok(valid) => format!("OK {}", valid),
+                        Err(e) => format!("ERROR {}", e),
+                    }
+                }
+            }
             "MERKLE_RESET" => {
                 *MERKLE_TREE.lock().unwrap() = Some(merkle::MerkleTree::new());
                 "OK".to_string()
@@ -238,6 +270,16 @@ fn handle_merkle_verify(args: &[&str]) -> String {
 
     let valid = merkle::MerkleTree::verify(&proof);
     format!("OK {}", valid)
+}
+
+fn hex_decode_vec(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("Odd hex length".into());
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| "Invalid hex".into()))
+        .collect()
 }
 
 fn hex_to_array(hex: &str) -> Result<[u8; 32], String> {

@@ -156,10 +156,12 @@ version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "hkdf",
+ "hmac",
  "ml-kem",
  "rand",
  "security-framework",
  "sha2",
+ "sha3",
  "x25519-dalek",
  "zeroize",
 ]
