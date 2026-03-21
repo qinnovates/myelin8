@@ -310,6 +310,8 @@ See the full [security recommendations](#security-recommendations) section for t
 
 **Multi-project:** Point Engram at 5 project memory dirs. Cross-project search finds the answer regardless of which project it was in.
 
+**Spatial memory (Spot):** Engram extends beyond AI context to spatial data — LiDAR geometry, walking routes, indoor maps, bench/bathroom locations. The same tiered compression that handles conversation history handles spatial memory for [Spot](https://github.com/qinnovates/spot), a LiDAR navigation app. Routes compress from hot (live LiDAR) to frozen (Parquet-archived geometry). Peer-to-peer spatial sharing between devices uses NSP-wrapped payloads with Merkle proofs for selective verification. See [docs/SPATIAL-EXTENSION.md](docs/SPATIAL-EXTENSION.md).
+
 ---
 
 ## Configuration
