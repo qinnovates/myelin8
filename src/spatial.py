@@ -33,8 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from .merkle import MerkleTree, MerkleProof, rollup_from_hashes
-from .metadata import MetadataStore, ArtifactMeta, Tier
+from .metadata import Tier
 
 
 class SpatialArtifactType(str, Enum):
@@ -122,15 +121,15 @@ class SpatialMemory:
     builds the Merkle tree for integrity verification and selective peer sharing.
     """
 
-    def __init__(self, storage_dir: Path):
+    def __init__(self, storage_dir: Path, vault=None):
         self.storage_dir = storage_dir
         self.artifacts_dir = storage_dir / "spatial"
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        self.tree = MerkleTree()
+        self._vault = vault  # VaultClient for Rust Merkle ops (optional)
+        self._leaf_count = 0
         self.artifacts: dict[str, SpatialArtifact] = {}
 
-        self._tree_path = self.artifacts_dir / "merkle-tree.json"
         self._registry_path = self.artifacts_dir / "spatial-registry.json"
 
         self._load()
@@ -180,8 +179,12 @@ class SpatialMemory:
             peer_confirmations=1 if source == "peer" else 0,
         )
 
-        # Add to Merkle tree
-        leaf_index = self.tree.add(data_bytes)
+        # Add to Merkle tree (Rust sidecar if available)
+        if self._vault:
+            leaf_index = self._vault.merkle_add(sha256)
+        else:
+            leaf_index = self._leaf_count
+            self._leaf_count += 1
         artifact.merkle_leaf_index = leaf_index
 
         # Store
@@ -207,28 +210,34 @@ class SpatialMemory:
 
     # ── Merkle Proofs ──
 
-    def proof_for(self, sha256: str) -> Optional[MerkleProof]:
+    def proof_for(self, sha256: str) -> Optional[dict]:
         """Generate a Merkle proof for an artifact by its hash."""
         artifact = self.artifacts.get(sha256)
         if not artifact or artifact.merkle_leaf_index < 0:
             return None
-        return self.tree.proof(artifact.merkle_leaf_index)
+        if self._vault:
+            return self._vault.merkle_proof(artifact.merkle_leaf_index)
+        return None  # No vault = no proofs (testing without Rust)
 
-    def verify_proof(self, proof: MerkleProof) -> bool:
-        """Verify a Merkle proof against the current tree root."""
-        return MerkleTree.verify(proof)
+    def verify_proof(self, proof: dict) -> bool:
+        """Verify a Merkle proof. Runs in Rust sidecar (constant-time)."""
+        if self._vault:
+            return self._vault.merkle_verify(proof)
+        return False  # No vault = can't verify
 
     @property
     def merkle_root(self) -> Optional[str]:
         """Current Merkle root hash (hex)."""
-        return self.tree.root_hex
+        if self._vault:
+            return self._vault.merkle_root()
+        return None
 
-    # ── Rollup ──
-
-    def rollup_route(self, artifacts: list[SpatialArtifact]) -> tuple[MerkleTree, str]:
-        """Batch multiple route segments into one Merkle tree for efficient signing."""
-        hashes = [a.sha256 for a in artifacts]
-        return rollup_from_hashes(hashes)
+    @property
+    def leaf_count(self) -> int:
+        """Number of leaves in the Merkle tree."""
+        if self._vault:
+            return self._vault.merkle_count()
+        return self._leaf_count
 
     # ── Search ──
 
@@ -311,7 +320,7 @@ class SpatialMemory:
             "by_type": by_type,
             "peer_shared": peer_count,
             "merkle_root": self.merkle_root,
-            "merkle_leaves": self.tree.leaf_count,
+            "merkle_leaves": self.leaf_count,
         }
 
     # ── Keywords ──
@@ -353,9 +362,7 @@ class SpatialMemory:
         from .fileutil import atomic_write_text
         registry = {k: v.to_dict() for k, v in self.artifacts.items()}
         atomic_write_text(self._registry_path, json.dumps(registry, indent=2))
-
-        # Save Merkle tree (already uses atomic write internally)
-        self.tree.save(str(self._tree_path))
+        # Merkle tree state lives in the Rust sidecar process — no Python persistence needed
 
     def _load(self) -> None:
         # Load registry
@@ -364,7 +371,10 @@ class SpatialMemory:
                 data = json.load(f)
             for key, val in data.items():
                 self.artifacts[key] = SpatialArtifact.from_dict(val)
+            self._leaf_count = len(self.artifacts)
 
-        # Load Merkle tree
-        if self._tree_path.exists():
-            self.tree = MerkleTree.load(str(self._tree_path))
+            # Re-add hashes to Rust Merkle tree on load
+            if self._vault:
+                self._vault.merkle_reset()
+                for artifact in self.artifacts.values():
+                    self._vault.merkle_add(artifact.sha256)

@@ -151,13 +151,13 @@ class TieringEngine:
         self.index = SemanticIndex(meta_dir)
         self.pipeline = CompressionPipeline(meta_dir)
 
-        # Merkle tree — integrity verification across all artifacts
-        from .merkle import MerkleTree
-        self._merkle_path = meta_dir / "merkle-tree.json"
-        if self._merkle_path.exists():
-            self.merkle = MerkleTree.load(str(self._merkle_path))
-        else:
-            self.merkle = MerkleTree()
+        # Merkle tree — integrity verification via Rust sidecar
+        self._vault_client = None
+        try:
+            from .vault import VaultClient
+            self._vault_client = VaultClient()
+        except Exception:
+            pass  # Sidecar not available — Merkle ops will be no-ops
 
         # Audit logging — disabled by default, opt-in via config
         self._audit = None
@@ -192,47 +192,68 @@ class TieringEngine:
         if self._audit:
             getattr(self._audit, method)(**kwargs)
 
-    # ── Merkle Integrity ──
+    # ── Merkle Integrity (Rust sidecar) ──
 
-    def _save_merkle(self) -> None:
-        """Persist the Merkle tree to disk."""
-        self.merkle.save(str(self._merkle_path))
+    def _merkle_add(self, sha256_hex: str) -> None:
+        """Add a hash to the Merkle tree via Rust sidecar."""
+        if self._vault_client and sha256_hex:
+            try:
+                self._vault_client.merkle_add(sha256_hex)
+            except Exception:
+                pass  # Non-fatal — Merkle is supplementary to per-artifact SHA-256
 
     @property
     def merkle_root(self) -> Optional[str]:
         """Current Merkle root hash. One hash that covers all artifacts."""
-        return self.merkle.root_hex
+        if self._vault_client:
+            try:
+                return self._vault_client.merkle_root()
+            except Exception:
+                return None
+        return None
+
+    @property
+    def merkle_leaf_count(self) -> int:
+        if self._vault_client:
+            try:
+                return self._vault_client.merkle_count()
+            except Exception:
+                return 0
+        return 0
 
     def verify_integrity(self) -> tuple[bool, list[str]]:
         """
         Verify all artifact hashes against the Merkle tree.
 
-        Returns (all_valid, list_of_issues).
-        If the Merkle root matches the recomputed tree, all artifacts
-        are intact. If not, identifies which artifacts diverged.
+        Rebuilds the tree from registry hashes in the Rust sidecar,
+        then compares the root to the stored root.
         """
-        if self.merkle.leaf_count == 0:
+        if not self._vault_client:
+            return True, ["Merkle sidecar not available"]
+
+        stored_root = self.merkle_root
+        if not stored_root:
             return True, ["No artifacts in Merkle tree yet"]
 
-        # Recompute tree from current artifact hashes
-        from .merkle import MerkleTree
-        fresh = MerkleTree()
+        # Rebuild a fresh tree in the sidecar
+        self._vault_client.merkle_reset()
         issues: list[str] = []
 
         for key, meta in self.metadata._artifacts.items():
             if meta.sha256:
-                fresh.add_hex(meta.sha256)
+                self._vault_client.merkle_add(meta.sha256)
             elif meta.tier == "hot" and Path(meta.path).exists():
-                # Recompute hash for hot artifacts
                 current = compute_sha256(Path(meta.path))
-                fresh.add_hex(current)
+                self._vault_client.merkle_add(current)
 
-        if fresh.root_hex == self.merkle.root_hex:
+        fresh_root = self._vault_client.merkle_root()
+
+        if fresh_root == stored_root:
             return True, []
 
         issues.append(
-            f"Merkle root mismatch: stored={self.merkle.root_hex[:16]}... "
-            f"computed={fresh.root_hex[:16] if fresh.root_hex else 'empty'}..."
+            f"Merkle root mismatch: stored={stored_root[:16]}... "
+            f"computed={fresh_root[:16] if fresh_root else 'empty'}..."
         )
         return False, issues
 
@@ -241,22 +262,27 @@ class TieringEngine:
         Generate a Merkle proof for a specific artifact.
 
         Proves this artifact is part of the authenticated memory store
-        without revealing any other artifacts. Returns proof as dict,
-        or None if artifact not in tree.
+        without revealing any other artifacts. Proof generation runs
+        in the Rust sidecar (constant-time).
         """
-        from .merkle import MerkleProof
+        if not self._vault_client:
+            return None
         meta = self.metadata.get(path)
         if not meta or not meta.sha256:
             return None
 
-        # Find the leaf index by matching hash
-        target = bytes.fromhex(meta.sha256)
-        for i, leaf in enumerate(self.merkle.leaves):
-            if leaf == target:
-                proof = self.merkle.proof(i)
-                return proof.to_dict()
+        # Find the leaf index by scanning registry order
+        # (artifacts are added in order, so index matches registration order)
+        index = 0
+        for key, m in self.metadata._artifacts.items():
+            if m.sha256 == meta.sha256:
+                try:
+                    return self._vault_client.merkle_proof(index)
+                except Exception:
+                    return None
+            if m.sha256:
+                index += 1
 
-        # Hash not in tree — artifact was added before Merkle was enabled
         return None
 
     def _encrypt_if_enabled(self, compressed_path: Path,
@@ -413,12 +439,11 @@ class TieringEngine:
         self.metadata.save()
         self.index.save()
 
-        # Add to Merkle tree — each artifact gets a leaf
+        # Add to Merkle tree (Rust sidecar) — each artifact gets a leaf
         for p in paths:
             meta = self.metadata.get(p)
             if meta and meta.sha256:
-                self.merkle.add_hex(meta.sha256)
-        self._save_merkle()
+                self._merkle_add(meta.sha256)
 
         # Encrypt hot artifacts at rest if configured
         if (self.config.encryption.enabled

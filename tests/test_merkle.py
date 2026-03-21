@@ -1,196 +1,153 @@
-"""Tests for Merkle tree — integrity, proofs, rollups."""
+"""Tests for Merkle tree via Rust sidecar (engram-vault)."""
 
-import json
-import tempfile
-from pathlib import Path
+import pytest
 
-from src.merkle import MerkleTree, MerkleProof, rollup, rollup_from_hashes
+from src.vault import VaultClient
+from src.encryption import EncryptionError
 
 
-class TestMerkleTree:
+@pytest.fixture
+def vault():
+    """Create a VaultClient connected to the sidecar."""
+    try:
+        client = VaultClient()
+        client.merkle_reset()  # Start fresh
+        yield client
+        client.close()
+    except EncryptionError:
+        pytest.skip("engram-vault sidecar not available")
 
-    def test_empty_tree_has_no_root(self):
-        tree = MerkleTree()
-        assert tree.root is None
-        assert tree.root_hex is None
 
-    def test_single_leaf(self):
-        tree = MerkleTree()
-        tree.add(b"hello")
-        assert tree.root is not None
-        assert tree.leaf_count == 1
+class TestMerkleAdd:
 
-    def test_two_leaves_different_root_than_one(self):
-        tree1 = MerkleTree()
-        tree1.add(b"hello")
+    def test_add_returns_index(self, vault):
+        idx = vault.merkle_add("a" * 64)
+        assert idx == 0
 
-        tree2 = MerkleTree()
-        tree2.add(b"hello")
-        tree2.add(b"world")
+    def test_sequential_indices(self, vault):
+        idx0 = vault.merkle_add("a" * 64)
+        idx1 = vault.merkle_add("b" * 64)
+        idx2 = vault.merkle_add("c" * 64)
+        assert idx0 == 0
+        assert idx1 == 1
+        assert idx2 == 2
 
-        assert tree1.root_hex != tree2.root_hex
+    def test_count_tracks_adds(self, vault):
+        assert vault.merkle_count() == 0
+        vault.merkle_add("a" * 64)
+        assert vault.merkle_count() == 1
+        vault.merkle_add("b" * 64)
+        assert vault.merkle_count() == 2
 
-    def test_deterministic_root(self):
-        tree1 = MerkleTree()
-        tree1.add(b"a")
-        tree1.add(b"b")
-        tree1.add(b"c")
+    def test_invalid_hex_rejected(self, vault):
+        with pytest.raises(EncryptionError):
+            vault.merkle_add("not_hex")
 
-        tree2 = MerkleTree()
-        tree2.add(b"a")
-        tree2.add(b"b")
-        tree2.add(b"c")
+    def test_wrong_length_rejected(self, vault):
+        with pytest.raises(EncryptionError):
+            vault.merkle_add("abcd")  # Too short
 
-        assert tree1.root_hex == tree2.root_hex
 
-    def test_different_order_different_root(self):
-        tree1 = MerkleTree()
-        tree1.add(b"a")
-        tree1.add(b"b")
+class TestMerkleRoot:
 
-        tree2 = MerkleTree()
-        tree2.add(b"b")
-        tree2.add(b"a")
+    def test_empty_tree_returns_none(self, vault):
+        assert vault.merkle_root() is None
 
-        assert tree1.root_hex != tree2.root_hex
+    def test_root_after_add(self, vault):
+        vault.merkle_add("a" * 64)
+        root = vault.merkle_root()
+        assert root is not None
+        assert len(root) == 64  # SHA-256 hex
 
-    def test_tamper_detection(self):
-        tree = MerkleTree()
-        tree.add(b"original")
-        original_root = tree.root_hex
+    def test_root_changes_with_new_leaf(self, vault):
+        vault.merkle_add("a" * 64)
+        root1 = vault.merkle_root()
+        vault.merkle_add("b" * 64)
+        root2 = vault.merkle_root()
+        assert root1 != root2
 
-        tree2 = MerkleTree()
-        tree2.add(b"tampered")
-        assert tree2.root_hex != original_root
+    def test_deterministic_root(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        root1 = vault.merkle_root()
+
+        vault.merkle_reset()
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        root2 = vault.merkle_root()
+
+        assert root1 == root2
+
+    def test_different_order_different_root(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        root1 = vault.merkle_root()
+
+        vault.merkle_reset()
+        vault.merkle_add("b" * 64)
+        vault.merkle_add("a" * 64)
+        root2 = vault.merkle_root()
+
+        assert root1 != root2
 
 
 class TestMerkleProof:
 
-    def test_proof_for_first_leaf(self):
-        tree = MerkleTree()
-        tree.add(b"a")
-        tree.add(b"b")
-        tree.add(b"c")
-        tree.add(b"d")
+    def test_proof_for_first_leaf(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        vault.merkle_add("c" * 64)
+        vault.merkle_add("d" * 64)
 
-        proof = tree.proof(0)
-        assert MerkleTree.verify(proof)
+        proof = vault.merkle_proof(0)
+        assert proof["leaf_index"] == 0
+        assert vault.merkle_verify(proof)
 
-    def test_proof_for_last_leaf(self):
-        tree = MerkleTree()
+    def test_proof_for_last_leaf(self, vault):
         for i in range(8):
-            tree.add(f"item-{i}".encode())
+            vault.merkle_add(f"{i:064x}")
 
-        proof = tree.proof(7)
-        assert MerkleTree.verify(proof)
+        proof = vault.merkle_proof(7)
+        assert vault.merkle_verify(proof)
 
-    def test_proof_for_middle_leaf(self):
-        tree = MerkleTree()
-        for i in range(16):
-            tree.add(f"data-{i}".encode())
+    def test_proof_fails_with_wrong_root(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
 
-        proof = tree.proof(7)
-        assert MerkleTree.verify(proof)
+        proof = vault.merkle_proof(0)
+        proof["root"] = "0" * 64  # Fake root
+        assert not vault.merkle_verify(proof)
 
-    def test_proof_fails_with_wrong_root(self):
-        tree = MerkleTree()
-        tree.add(b"a")
-        tree.add(b"b")
+    def test_proof_fails_with_tampered_leaf(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
 
-        proof = tree.proof(0)
-        proof.root = "0" * 64  # fake root
-        assert not MerkleTree.verify(proof)
+        proof = vault.merkle_proof(0)
+        proof["leaf_hash"] = "0" * 64  # Tampered
+        assert not vault.merkle_verify(proof)
 
-    def test_proof_fails_with_tampered_leaf(self):
-        tree = MerkleTree()
-        tree.add(b"a")
-        tree.add(b"b")
-
-        proof = tree.proof(0)
-        proof.leaf_hash = "0" * 64  # fake leaf
-        assert not MerkleTree.verify(proof)
-
-    def test_proof_serialization(self):
-        tree = MerkleTree()
-        tree.add(b"test")
-        tree.add(b"data")
-
-        proof = tree.proof(0)
-        json_str = proof.to_json()
-        restored = MerkleProof.from_json(json_str)
-
-        assert restored.leaf_hash == proof.leaf_hash
-        assert restored.root == proof.root
-        assert MerkleTree.verify(restored)
-
-    def test_odd_number_of_leaves(self):
-        tree = MerkleTree()
-        tree.add(b"a")
-        tree.add(b"b")
-        tree.add(b"c")  # 3 leaves, not a power of 2
+    def test_odd_number_of_leaves(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        vault.merkle_add("c" * 64)  # 3 = not power of 2
 
         for i in range(3):
-            proof = tree.proof(i)
-            assert MerkleTree.verify(proof)
+            proof = vault.merkle_proof(i)
+            assert vault.merkle_verify(proof)
 
-    def test_single_leaf_proof(self):
-        tree = MerkleTree()
-        tree.add(b"only")
-
-        proof = tree.proof(0)
-        assert MerkleTree.verify(proof)
+    def test_single_leaf_proof(self, vault):
+        vault.merkle_add("a" * 64)
+        proof = vault.merkle_proof(0)
+        assert vault.merkle_verify(proof)
 
 
-class TestRollup:
+class TestMerkleReset:
 
-    def test_rollup_produces_tree_and_root(self):
-        items = [b"snapshot-1", b"snapshot-2", b"snapshot-3"]
-        tree, root = rollup(items)
+    def test_reset_clears_tree(self, vault):
+        vault.merkle_add("a" * 64)
+        vault.merkle_add("b" * 64)
+        assert vault.merkle_count() == 2
 
-        assert root is not None
-        assert tree.leaf_count == 3
-        assert tree.root_hex == root
-
-    def test_rollup_from_hashes(self):
-        import hashlib
-        hashes = [hashlib.sha256(f"item-{i}".encode()).hexdigest() for i in range(10)]
-        tree, root = rollup_from_hashes(hashes)
-
-        assert tree.leaf_count == 10
-        assert root is not None
-
-    def test_rollup_proof_works(self):
-        items = [f"geometry-snapshot-{i}".encode() for i in range(200)]
-        tree, root = rollup(items)
-
-        # Can prove any single snapshot
-        proof = tree.proof(99)
-        assert MerkleTree.verify(proof)
-
-        # Root matches
-        assert proof.root == root
-
-
-class TestSerialization:
-
-    def test_save_and_load(self):
-        tree = MerkleTree()
-        for i in range(10):
-            tree.add(f"data-{i}".encode())
-
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-            tree.save(f.name)
-            loaded = MerkleTree.load(f.name)
-
-        assert loaded.root_hex == tree.root_hex
-        assert loaded.leaf_count == tree.leaf_count
-
-    def test_json_roundtrip(self):
-        tree = MerkleTree()
-        tree.add(b"test")
-        tree.add(b"roundtrip")
-
-        json_str = tree.to_json()
-        restored = MerkleTree.from_json(json_str)
-
-        assert restored.root_hex == tree.root_hex
+        vault.merkle_reset()
+        assert vault.merkle_count() == 0
+        assert vault.merkle_root() is None

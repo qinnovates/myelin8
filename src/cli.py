@@ -265,11 +265,12 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     # Merkle tree verification
     print()
-    if engine.merkle.leaf_count > 0:
+    if engine.merkle_leaf_count > 0:
         merkle_ok, merkle_issues = engine.verify_integrity()
+        root = engine.merkle_root
         print(f"Merkle Tree")
-        print(f"  Root:         {engine.merkle_root[:16]}..." if engine.merkle_root else "  Root:         (empty)")
-        print(f"  Leaves:       {engine.merkle.leaf_count}")
+        print(f"  Root:         {root[:16]}..." if root else "  Root:         (empty)")
+        print(f"  Leaves:       {engine.merkle_leaf_count}")
         print(f"  Integrity:    {'PASS' if merkle_ok else 'FAIL'}")
         if merkle_issues:
             for issue in merkle_issues:

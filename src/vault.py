@@ -188,6 +188,70 @@ class VaultClient:
             f"Vault keygen failed: {response.removeprefix('ERROR ')}"
         )
 
+    # ── Merkle Tree (integrity verification) ──
+
+    def merkle_add(self, sha256_hex: str) -> int:
+        """Add a SHA-256 hash as a Merkle leaf. Returns leaf index."""
+        if len(sha256_hex) != 64:
+            raise EncryptionError("SHA-256 hex must be 64 characters")
+        self._validate_input(sha256_hex, "sha256_hex")
+        response = self._send(f"MERKLE_ADD {sha256_hex}")
+        if response.startswith("OK "):
+            return int(response[3:].strip())
+        raise EncryptionError(f"Merkle add failed: {response}")
+
+    def merkle_root(self) -> Optional[str]:
+        """Get the current Merkle root hash."""
+        response = self._send("MERKLE_ROOT")
+        if response == "OK empty":
+            return None
+        if response.startswith("OK "):
+            return response[3:].strip()
+        raise EncryptionError(f"Merkle root failed: {response}")
+
+    def merkle_proof(self, index: int) -> dict:
+        """Generate a Merkle proof for leaf at index. Returns proof dict."""
+        response = self._send(f"MERKLE_PROOF {index}")
+        if not response.startswith("OK "):
+            raise EncryptionError(f"Merkle proof failed: {response}")
+        parts = response[3:].strip().split()
+        if len(parts) < 5:
+            raise EncryptionError(f"Unexpected proof format: {response}")
+        return {
+            "leaf_hash": parts[0],
+            "leaf_index": int(parts[1]),
+            "siblings": parts[2].split(",") if parts[2] else [],
+            "directions": parts[3].split(",") if parts[3] else [],
+            "root": parts[4],
+        }
+
+    def merkle_verify(self, proof: dict) -> bool:
+        """Verify a Merkle proof. Constant-time in Rust."""
+        leaf = proof["leaf_hash"]
+        siblings = ",".join(proof["siblings"])
+        directions = ",".join(proof["directions"])
+        root = proof["root"]
+        combined = f"{siblings}|{directions}"
+        response = self._send(f"MERKLE_VERIFY {leaf} {combined} {root}")
+        if response == "OK true":
+            return True
+        if response == "OK false":
+            return False
+        raise EncryptionError(f"Merkle verify failed: {response}")
+
+    def merkle_count(self) -> int:
+        """Get the number of leaves in the Merkle tree."""
+        response = self._send("MERKLE_COUNT")
+        if response.startswith("OK "):
+            return int(response[3:].strip())
+        raise EncryptionError(f"Merkle count failed: {response}")
+
+    def merkle_reset(self) -> None:
+        """Reset the Merkle tree (clear all leaves)."""
+        response = self._send("MERKLE_RESET")
+        if response != "OK":
+            raise EncryptionError(f"Merkle reset failed: {response}")
+
     def close(self) -> None:
         """Shut down the sidecar process."""
         if self._proc and self._proc.poll() is None:
