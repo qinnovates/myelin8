@@ -570,3 +570,64 @@ Written and committed: `docs/DATA-CONTRACT.md`. Defines accepted input (valid UT
 ### What the 1 remaining failure means
 
 The `special-chars.md` failure is a test construction issue, not a system bug. Python writes `\r` and then computes an expected hash on the Python string. Rust reads raw bytes and hashes those. Both are correct — they're hashing different representations. The system's behavior (hash raw bytes from disk) is the correct one per the data contract.
+
+---
+
+## 2026-03-22 — Production Validation: ALL 11 PHASES PASS
+
+### The Test
+
+Spawned a fresh-context subagent with zero knowledge of expected results. The subagent received a self-contained prompt describing myelin8, its CLI, data directory, and a 6-phase test protocol with explicit pass/fail criteria. It executed independently.
+
+### Why Subagent (Not Inline)
+
+The validation ran in a subagent instead of the main conversation because:
+1. **No anchoring bias** — the tester didn't know what the "right" answer was
+2. **Fresh context** — no contamination from 12 hours of design discussion
+3. **Independent verification** — the subagent couldn't be influenced by our expectations
+4. **Isolation** — test output didn't pollute the main conversation's context window
+
+This is now a documented pattern in Quorum: the "Validation Subagent Pattern."
+
+### Results
+
+| Phase | Result | Details |
+|---|---|---|
+| 0 - Baseline | PASS | Production data backed up, counts recorded |
+| 1 - Ingest | PASS | 25 synthetic files ingested, all searchable, verify passes |
+| 2 - Partial Compaction | PASS | 10 aged files → Parquet, all recalled with matching SHA-256 |
+| 3 - Full Compaction | PASS | All artifacts in Parquet, zero data loss, all searchable |
+| 4a - Corrupt Parquet | PASS | Corruption detected by verify, not silently ignored |
+| 4b - Missing Parquet | PASS | Graceful "not found", no crash |
+| 4c - Truncated Hot | PASS | Handled gracefully, no collateral damage |
+| 4d - Large File (1MB) | PASS | Round-trips with matching SHA-256 |
+| 4e - Unicode | PASS | Emoji, CJK, RTL preserved through pipeline |
+| 4f - Concurrent Access | PASS | No crash during simultaneous search + run |
+| 5 - Restore | PASS | Production data restored, matches baseline exactly |
+
+### Bug Found During Validation
+
+**Compaction early-return bug:** `cli.rs` had `return Ok(())` when no new source files were found. This skipped the compaction phase entirely — hot files that aged past the threshold would never compact if no new source files existed. The validator worked around it by creating a dummy trigger file, then reported the bug.
+
+**Fix:** Replaced `return Ok(())` with a continue-past comment. The ingest loop handles empty arrays gracefully (zero iterations), so compaction at line 219 now always runs.
+
+### What This Proves
+
+The Rust compaction pipeline works end-to-end on real (synthetic) data:
+- Hot JSON files age → move to Parquet → content preserved (SHA-256 verified)
+- Search works before, during, and after compaction (tantivy index is independent)
+- Recall from Parquet returns exact original content
+- Corruption is detected, not silently passed through
+- Concurrent access doesn't cause crashes or data loss
+- Production data survived the test unchanged
+
+### Integration Decision: Skill via Bash, Not MCP
+
+The MCP server (`mcp.rs`) was built but is not the right integration path. myelin8 is a stateless CLI tool — each invocation opens the index, does its work, exits. No persistence needed, no background process, no outbound network calls.
+
+**Integration path:** Claude Code skill (`~/.claude/skills/myelin8/SKILL.md`) teaches Claude when to call `myelin8 search` via Bash. This is:
+- More secure (no running daemon, no socket, no IPC attack surface)
+- Simpler (no protocol framing issues, no MCP version compatibility)
+- Already working (skill loaded, commands tested)
+
+The MCP code stays in the repo for future use (multi-client scenarios, IDE integration) but is not the primary integration.
