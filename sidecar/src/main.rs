@@ -36,7 +36,7 @@ use std::path::Path;
 use zeroize::Zeroize;
 
 mod crypto;
-mod keychain;
+mod keystore;
 mod merkle;
 mod simhash;
 
@@ -597,7 +597,7 @@ fn hex_to_array(hex: &str) -> Result<[u8; 32], String> {
 
 fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
     let input_path = match canonicalize_path(input) { Ok(p) => p, Err(e) => return e };
-    let pubkey_hex = match keychain::get_public_key(tier) { Ok(k) => k, Err(e) => return format!("ERROR {}", e) };
+    let pubkey_hex = match keystore::get_public_key(tier) { Ok(k) => k, Err(e) => return format!("ERROR {}", e) };
     let pubkey_bytes = match hex::decode(&pubkey_hex) { Ok(b) => b, Err(_) => return "ERROR Invalid public key".to_string() };
     let meta = match fs::metadata(&input_path) { Ok(m) => m, Err(e) => return format!("ERROR {}", e) };
     if meta.len() > MAX_FILE_SIZE { return "ERROR Input file too large".to_string(); }
@@ -624,7 +624,7 @@ fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
 
 fn handle_decrypt(input: &str, output: &str, tier: &str) -> String {
     let input_path = match canonicalize_path(input) { Ok(p) => p, Err(e) => return e };
-    let mut privkey_hex = match keychain::get_private_key(tier) { Ok(k) => k, Err(_) => return "ERROR Decryption failed".to_string() };
+    let mut privkey_hex = match keystore::get_private_key(tier) { Ok(k) => k, Err(_) => return "ERROR Decryption failed".to_string() };
     let mut privkey_bytes = match hex::decode(&privkey_hex) {
         Ok(b) => b,
         Err(_) => { privkey_hex.zeroize(); return "ERROR Decryption failed".to_string(); }
@@ -656,17 +656,17 @@ fn handle_decrypt(input: &str, output: &str, tier: &str) -> String {
 }
 
 fn handle_keygen(tier: &str) -> String {
-    if keychain::get_private_key(tier).is_ok() {
+    if keystore::get_private_key(tier).is_ok() {
         return format!("ERROR Key already exists for tier '{}'", tier);
     }
     let (privkey_bytes, pubkey_bytes) = crypto::generate_keypair();
     let pubkey_hex = hex::encode(&pubkey_bytes);
     let mut privkey_hex = hex::encode(&privkey_bytes);
-    if let Err(e) = keychain::store_public_key(tier, &pubkey_hex) {
+    if let Err(e) = keystore::store_public_key(tier, &pubkey_hex) {
         privkey_hex.zeroize();
         return format!("ERROR {}", e);
     }
-    let store_result = keychain::store_private_key(tier, &privkey_hex);
+    let store_result = keystore::store_private_key(tier, &privkey_hex);
     privkey_hex.zeroize();
     match store_result {
         Ok(()) => format!("OK {}", pubkey_hex),

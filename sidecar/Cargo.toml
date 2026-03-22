@@ -28,7 +28,8 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 # Zero-on-drop — deterministic memory zeroing
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
-# macOS Keychain — Security.framework bindings
+# macOS Keychain — Security.framework bindings (macOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
 
 # Cryptographic randomness (OS-provided, SP 800-90A compliant)
