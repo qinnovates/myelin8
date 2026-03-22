@@ -225,7 +225,17 @@ All thresholds configurable. Choose 2-tier (simple) or 4-tier (full) during setu
 
 **CoGraph — associative recall.** When you recall one artifact, CoGraph automatically surfaces related ones. Layer 3 (co-occurrence) tracks which artifacts are recalled together using PPMI edge weighting. Layer 4 (spreading activation) propagates through the graph via weighted BFS — like the brain's spreading activation network (Collins & Loftus 1975). The graph lives entirely in the Rust sidecar's mlocked memory — never written to disk. Ephemeral by design: no persistence means no attack surface at rest. ~7 MB worst case at 10K artifacts.
 
-**Everything local.** No data leaves your machine. No telemetry. No cloud dependency. Zero network calls. Embedding model (`all-MiniLM-L6-v2`, ~80 MB) runs entirely in-process on CPU — no external API, no cloud inference. HNSW and LSH indexes operate on these local embeddings. Without the embedding model, keyword search still works.
+**Everything local.** No data leaves your machine. No telemetry. No cloud dependency. Zero network calls. No third-party ML models. Keyword search + CoGraph handles retrieval with zero external dependencies. Optional embedding model available via `pip install bci-engram[embeddings]` for vector similarity — runs 100% local if installed.
+
+### What Engram encrypts today vs. what's in development
+
+**Currently encrypted:** AI session logs (`~/.claude/` history, subagent logs, debug traces, session metadata), research artifacts, and any directories you add to scan targets. These are historical records that don't need to be readable every session — they compress, encrypt, and recall on demand.
+
+**Working memory (`_memory/`) — in development.** Project memory files (`_memory/daily/`, `_memory/weekly/`, `_memory/archive/`) are the AI's persistent context across sessions. Hooks read these at session start. Encrypting them breaks the context pipeline — the LLM can't load what it can't read, and decrypting dozens of files on every session start adds latency and auth friction.
+
+This is the harder problem. The retrieval infrastructure is being built to solve it: CoGraph (co-occurrence tracking + spreading activation), the keyword inverted index, HNSW nearest-neighbor graphs, and Reciprocal Rank Fusion allow Engram to know what context is relevant *without* reading every file. Once the retrieval layer can reliably predict which memories the LLM needs for a given session, selective decryption becomes viable — decrypt only the 3-5 files that matter, not all 200+.
+
+This requires more testing to ensure the LLM doesn't lose critical context while memory files are encrypted at rest. The goal is encrypted-by-default working memory with retrieval-guided selective decryption. Not there yet.
 
 ---
 
