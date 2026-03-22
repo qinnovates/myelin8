@@ -488,7 +488,7 @@ Algorithms: ML-KEM-768 (FIPS 203) + X25519 hybrid KEM for key encapsulation, HKD
 
 ## Rust Crypto Sidecar
 
-`engram-vault` is a compiled Rust binary that handles all cryptographic operations in-process. No external binaries (no `age`, no `openssl`). All crypto is performed using Rust crates directly.
+`engram-vault` is a compiled Rust binary that handles all cryptographic operations in-process. No external binaries. All crypto is performed using Rust crates directly (ML-KEM-768, X25519, AES-256-GCM, SHA3-256, HMAC, HKDF).
 
 ### Why Rust, not Python
 

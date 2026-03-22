@@ -257,7 +257,7 @@ Not just "higher zstd levels" (that gets 3.2x to 3.8x). Each tier applies differ
 
 ## Encryption
 
-Optional. Engram works without it — compression, indexing, and context enhancement all function with zero encryption.
+**Not enabled by default.** Engram works without it — compression, indexing, and context enhancement all function with zero encryption. To enable encryption, run `engram encrypt-setup` to generate ML-KEM-768 keypairs and store them in your OS credential vault (Keychain on macOS). Then set `"encryption": {"enabled": true}` in `~/.engram/config.json`.
 
 When enabled, uses **ML-KEM-768** (NIST FIPS 203) in hybrid mode with X25519, using AES-256-GCM (NIST FIPS 197) for data encryption and HKDF-SHA256 (NIST SP 800-56C) for key derivation.
 

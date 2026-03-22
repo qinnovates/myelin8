@@ -122,7 +122,7 @@ class EnvelopeHeader:
     """
     version: int = HEADER_VERSION
     tier: str = "warm"
-    # The DEK encrypted by age using the tier's public key (base64 of the .encf ciphertext)
+    # The DEK encrypted via sidecar using the tier's public key (ML-KEM-768 + AES-256-GCM)
     encrypted_dek_hex: str = ""
     # SHA-256 of the original plaintext (pre-compression, pre-encryption)
     plaintext_hash: str = ""
@@ -160,7 +160,7 @@ def _resolve_private_key(source: str) -> str:
       file: — blocked. Private keys must not be plaintext on disk.
 
     Returns:
-        Raw private key string (AGE-SECRET-KEY-... or similar).
+        Raw private key string (hex-encoded ML-KEM-768 key material).
 
     Raises:
         EncryptionError: If key cannot be retrieved.

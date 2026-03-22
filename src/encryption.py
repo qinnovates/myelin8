@@ -6,7 +6,7 @@ The sidecar uses NIST-approved algorithms only:
   AES-256-GCM (FIPS 197 + SP 800-38D) authenticated encryption
   HKDF-SHA256 (SP 800-56C) key derivation
 
-No external binaries (age, GPG, etc). No key material in Python.
+No external binaries. No key material in Python.
 All crypto happens in the compiled Rust sidecar with mlock + zeroize.
 
 Security model:
