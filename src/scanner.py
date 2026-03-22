@@ -6,12 +6,10 @@ and any custom paths the user configures.
 
 This module knows WHERE to look. The engine decides WHAT to do.
 
-Coverage audit (2026-03-18):
-  Before: 4 Claude scan targets (~15% of archivable artifacts)
-  After:  18 Claude scan targets (~85-90% of archivable artifacts)
-  Added: debug logs, file-history snapshots, plans, tasks, paste-cache,
-         shell-snapshots, session metadata, project configs, skills,
-         settings, subagent .jsonl.gz compressed logs
+IMPORTANT: AI assistant directories (e.g. ~/.claude/, ~/.cursor/) are
+READ-ONLY indexing targets. Engram indexes and searches these files but
+must NEVER modify, compress, encrypt, or delete originals inside them.
+The engine enforces this via PROTECTED_PATHS in engine.py.
 """
 
 from __future__ import annotations

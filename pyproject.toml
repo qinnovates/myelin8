@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bci-engram"
-version = "1.1.0"
+version = "1.2.0"
 description = "Brain-inspired AI memory compression with optional post-quantum encryption. Extends context windows 3-50x through tiered storage and semantic indexing."
 readme = "README.md"
 license = {text = "MIT"}

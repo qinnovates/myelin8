@@ -164,7 +164,7 @@ class TierPolicy:
     # Minimum file size (bytes) to bother compressing
     min_file_size_bytes: int = 512
     # Keep original after compression (for safety during first run)
-    keep_originals: bool = False
+    keep_originals: bool = True
 
     def __post_init__(self) -> None:
         """Validate all fields are within safe ranges."""
@@ -244,72 +244,14 @@ class EngineConfig:
 
     @classmethod
     def default_claude_targets(cls) -> list[ScanTarget]:
-        """Default scan targets for Claude Code artifacts.
+        """Default scan targets for user project artifacts.
 
-        Coverage: ~85-90% of archivable Claude artifacts.
-        Audit date: 2026-03-18 (3.4 GB total, 16K+ files discovered).
+        NOTE: ~/.claude/ is intentionally excluded. Claude Code manages its
+        own session files and expects plaintext at specific paths. Engram
+        should index user-controlled project files, not Claude's internals.
+        Use 'engram init' to add custom scan targets for your projects.
         """
-        home = str(Path.home())
-        return [
-            # P0: Conversation history
-            ScanTarget(
-                path=f"{home}/.claude",
-                pattern="history.jsonl",
-                recursive=False,
-                description="Claude main conversation history",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/projects",
-                pattern="**/*.jsonl",
-                recursive=True,
-                description="Claude project session logs",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/projects",
-                pattern="**/*.jsonl.gz",
-                recursive=True,
-                description="Claude subagent logs (compressed)",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/projects",
-                pattern="**/memory/**/*",
-                recursive=True,
-                description="Claude project memory files",
-            ),
-            # P1: High-value context
-            ScanTarget(
-                path=f"{home}/.claude/debug",
-                pattern="*.txt",
-                description="Claude debug logs and error traces",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/tasks",
-                pattern="**/*.json",
-                recursive=True,
-                description="Task state and dependencies",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/todos",
-                pattern="*.json",
-                description="Todo entries",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/plans",
-                pattern="*.md",
-                description="Multi-step plans and strategic docs",
-            ),
-            # P2: Moderate context
-            ScanTarget(
-                path=f"{home}/.claude/subagents",
-                pattern="*.jsonl",
-                description="Subagent logs (legacy location)",
-            ),
-            ScanTarget(
-                path=f"{home}/.claude/sessions",
-                pattern="*.json",
-                description="Session metadata",
-            ),
-        ]
+        return []
 
     def validate(self) -> None:
         """Run all config validations. Called after loading."""

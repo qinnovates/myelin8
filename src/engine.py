@@ -28,6 +28,16 @@ from .config import EngineConfig
 from .metadata import MetadataStore, Tier, ArtifactMeta, compute_sha256
 from .compressor import decompress_file
 from .pipeline import CompressionPipeline
+
+# Paths that Engram must NEVER modify (compress, encrypt, or delete).
+# These directories are managed by their respective AI assistants and
+# expect plaintext files at specific paths. Engram can index/search them
+# but must not alter originals.
+PROTECTED_PATHS = [
+    Path.home() / ".claude",
+    Path.home() / ".cursor",
+    Path.home() / ".config" / "github-copilot",
+]
 from .encryption import EncryptionError
 from .context import SemanticIndex, ContextBuilder, ContextBudget, DEFAULT_CONTEXT_BUDGET_CHARS
 
@@ -533,6 +543,22 @@ class TieringEngine:
         self.index.save()
         return actions
 
+    def _is_protected(self, path: Path) -> bool:
+        """Check if a path is inside a protected directory.
+
+        Protected paths (e.g. ~/.claude/) are managed by their AI assistants
+        and must never be modified, compressed, or deleted by Engram.
+        Engram can index and search them, but not alter originals.
+        """
+        resolved = path.resolve()
+        for protected in PROTECTED_PATHS:
+            try:
+                resolved.relative_to(protected.resolve())
+                return True
+            except ValueError:
+                continue
+        return False
+
     def _tier_to_warm(self, meta: ArtifactMeta) -> Optional[TierAction]:
         """Compress a hot artifact to warm tier via multi-stage pipeline.
 
@@ -540,6 +566,9 @@ class TieringEngine:
         """
         src = Path(meta.path)
         if not src.exists():
+            return None
+
+        if self._is_protected(src):
             return None
 
         # Verify file integrity before compression
