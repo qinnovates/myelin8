@@ -8,7 +8,9 @@
 
 AI assistants forget. Context windows have hard limits. Fill it up and the oldest context falls off. Your assistant loses decisions from last week, code reviews from last month, and architecture conversations from last quarter. You re-explain the same context every session.
 
-The standard solution is "just expand the context window." But larger windows don't solve finding the right context (10M tokens of everything is worse than 32K of the right thing), don't solve cost (loading gigabytes per API call is expensive), and don't solve security (more data per prompt = more data at risk).
+That's today. Now think about a decade from now. Persistent AI memory is coming — assistants that remember years of your work, your preferences, your decisions. That's terabytes of session data accumulating on your machine. Most users don't have the storage for it. And the ones who do have all of it sitting in plaintext — every conversation, every code review, every personal decision — uncompressed, unencrypted, unmanageable.
+
+The standard solution is "just expand the context window." But larger windows don't solve finding the right context (10M tokens of everything is worse than 32K of the right thing), don't solve cost (loading gigabytes per API call is expensive), don't solve storage (years of sessions will consume hundreds of gigabytes uncompressed), and don't solve security (more data per prompt = more data at risk).
 
 ### The Approach
 
