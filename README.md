@@ -1,5 +1,7 @@
 # Engram
 
+> **Under active development and testing.** This is a research project exploring brain-inspired memory architecture for AI assistants. The code is open because the ideas might be useful to others building in this space — tiered compression, post-quantum encryption for AI memory, co-occurrence graphs for associative recall. Not production-ready. Expect rough edges, evolving APIs, and crypto that hasn't been independently audited. Use at your own risk.
+
 **Brain-modeled tiered memory for AI — with post-quantum encryption and Merkle integrity.**
 
 ### The Problem
