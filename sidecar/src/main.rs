@@ -81,14 +81,30 @@ fn main() {
         }
     }
 
+    // SIGTERM handler: graceful shutdown
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc_signal::signal(libc_signal::SIGTERM, libc_signal::SIG_DFL);
+            libc_signal::signal(libc_signal::SIGHUP, libc_signal::SIG_DFL);
+        }
+    }
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+
+    // Idle timeout: exit after 300s (5 min) of no input to prevent orphaned processes
+    use std::time::{Duration, Instant};
+    let idle_timeout = Duration::from_secs(300);
+    let mut last_activity = Instant::now();
 
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
             Err(_) => break,
         };
+
+        last_activity = Instant::now();
 
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
@@ -101,6 +117,7 @@ fn main() {
 
         let response = match cmd.as_str() {
             "PING" => "PONG".to_string(),
+            "VERSION" => "OK engram-vault 2.1.0".to_string(),
             "QUIT" => {
                 let _ = writeln!(stdout, "BYE");
                 break;
@@ -330,9 +347,11 @@ fn handle_index_search(query: &str) -> String {
         *fused_scores.entry(hash).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
     }
 
-    // SimHash results contribute to RRF
-    for (rank, (hash, _sim)) in simhash_results.iter().enumerate() {
-        *fused_scores.entry(hash.clone()).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+    // SimHash results contribute to RRF only above similarity threshold
+    for (rank, (hash, sim)) in simhash_results.iter().enumerate() {
+        if *sim >= simhash::MIN_SIMHASH_SIMILARITY {
+            *fused_scores.entry(hash.clone()).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+        }
     }
 
     // Sort by fused score, take top 20
@@ -459,7 +478,8 @@ mod serde_json_minimal {
             let rest = &self.raw[start..];
             if !rest.starts_with('"') { return None; }
             let inner = &rest[1..];
-            let end = inner.find('"')?;
+            // Find closing quote that is NOT escaped
+            let end = find_unescaped_quote(inner)?;
             Some(&inner[..end])
         }
 
@@ -488,6 +508,29 @@ mod serde_json_minimal {
                 .filter(|s| !s.is_empty())
                 .collect()
         }
+    }
+
+    /// Find the first `"` that isn't preceded by `\` (handles escaped quotes)
+    fn find_unescaped_quote(s: &str) -> Option<usize> {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'"' {
+                // Count preceding backslashes
+                let mut backslashes = 0;
+                let mut j = i;
+                while j > 0 && bytes[j - 1] == b'\\' {
+                    backslashes += 1;
+                    j -= 1;
+                }
+                // Quote is unescaped if preceded by even number of backslashes
+                if backslashes % 2 == 0 {
+                    return Some(i);
+                }
+            }
+            i += 1;
+        }
+        None
     }
 
     pub fn parse(raw: &str) -> Result<Value, String> {
@@ -646,6 +689,16 @@ mod hex {
 }
 
 // ── libc ──
+
+#[cfg(unix)]
+mod libc_signal {
+    pub const SIGTERM: i32 = 15;
+    pub const SIGHUP: i32 = 1;
+    pub const SIG_DFL: usize = 0;
+    extern "C" {
+        pub fn signal(sig: i32, handler: usize) -> usize;
+    }
+}
 
 #[cfg(unix)]
 mod libc {

@@ -51,6 +51,24 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Generate character n-gram shingles for short-text robustness.
+/// "merkle tree" → ["mer", "erk", "rkl", "kle", "le ", "e t", " tr", "tre", "ree"]
+/// More robust than word-level on short documents (<50 tokens).
+fn shingle(text: &str, n: usize) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    if chars.len() < n {
+        return vec![lower];
+    }
+    chars.windows(n)
+        .map(|w| w.iter().collect::<String>())
+        .collect()
+}
+
+/// Minimum similarity threshold for SimHash to contribute to RRF.
+/// Below this, the SimHash signal is noise, not signal.
+pub const MIN_SIMHASH_SIMILARITY: f64 = 0.55;
+
 /// Hash a word to a 256-bit vector using SHA3-256.
 fn word_hash(word: &str) -> [u8; 32] {
     let mut hasher = Sha3_256::new();
@@ -110,25 +128,29 @@ pub fn compute(text: &str) -> Fingerprint {
     fingerprint
 }
 
-/// Compute SimHash with IDF weighting from a corpus.
-/// `idf` maps word → inverse document frequency score.
+/// Compute SimHash with IDF weighting + character n-gram shingling.
+/// Combines word-level TF-IDF (good for long text) with 4-gram shingles
+/// (robust for short text). Both contribute to the final fingerprint.
 pub fn compute_weighted(text: &str, idf: &HashMap<String, f64>) -> Fingerprint {
     let tokens = tokenize(text);
-    if tokens.is_empty() {
+    let shingles = shingle(text, 4);
+
+    if tokens.is_empty() && shingles.is_empty() {
         return [0u8; 32];
     }
 
+    let mut acc = [0.0f64; 256];
+
+    // Word-level features (weighted by TF-IDF, 70% of signal)
     let mut freq: HashMap<String, f64> = HashMap::new();
     for token in &tokens {
         *freq.entry(token.clone()).or_insert(0.0) += 1.0;
     }
 
-    let mut acc = [0.0f64; 256];
-
     for (word, tf) in &freq {
         let hash = word_hash(word);
         let word_idf = idf.get(word).copied().unwrap_or(1.0);
-        let weight = tf * word_idf; // TF-IDF
+        let weight = tf * word_idf * 0.7;
 
         for byte_idx in 0..32 {
             for bit_idx in 0..8 {
@@ -137,6 +159,22 @@ pub fn compute_weighted(text: &str, idf: &HashMap<String, f64>) -> Fingerprint {
                     acc[dim] += weight;
                 } else {
                     acc[dim] -= weight;
+                }
+            }
+        }
+    }
+
+    // Character n-gram features (30% of signal, robust on short text)
+    let shingle_weight = 0.3 / shingles.len().max(1) as f64;
+    for sg in &shingles {
+        let hash = word_hash(sg);
+        for byte_idx in 0..32 {
+            for bit_idx in 0..8 {
+                let dim = byte_idx * 8 + bit_idx;
+                if (hash[byte_idx] >> (7 - bit_idx)) & 1 == 1 {
+                    acc[dim] += shingle_weight;
+                } else {
+                    acc[dim] -= shingle_weight;
                 }
             }
         }
@@ -187,6 +225,8 @@ pub struct SimHashIndex {
     doc_count: usize,
     /// Document frequency per word
     df: HashMap<String, usize>,
+    /// Pending texts awaiting finalization (bulk load optimization)
+    pending_texts: Vec<(String, String)>,
 }
 
 impl SimHashIndex {
@@ -196,10 +236,11 @@ impl SimHashIndex {
             idf: HashMap::new(),
             doc_count: 0,
             df: HashMap::new(),
+            pending_texts: Vec::new(),
         }
     }
 
-    /// Add a document to the index.
+    /// Add a document to the index. Call `finalize()` after bulk adds.
     pub fn add(&mut self, artifact_hash: &str, text: &str) {
         // Update document frequency
         let tokens = tokenize(text);
@@ -209,16 +250,28 @@ impl SimHashIndex {
         }
         self.doc_count += 1;
 
-        // Recompute IDF
+        // Store raw text for deferred fingerprint computation
+        self.pending_texts.push((artifact_hash.to_string(), text.to_string()));
+    }
+
+    /// Finalize the index — compute IDF once, then generate all fingerprints.
+    /// Call after bulk loading. O(V + N*T) instead of O(N*V).
+    pub fn finalize(&mut self) {
         self.recompute_idf();
 
-        // Compute fingerprint with IDF weighting
-        let fp = compute_weighted(text, &self.idf);
-        self.fingerprints.push((artifact_hash.to_string(), fp));
+        // Compute fingerprints for all pending documents
+        for (hash, text) in self.pending_texts.drain(..) {
+            let fp = compute_weighted(&text, &self.idf);
+            self.fingerprints.push((hash, fp));
+        }
     }
 
     /// Search for similar documents. Returns (artifact_hash, similarity) sorted by similarity desc.
-    pub fn search(&self, query: &str, top_k: usize) -> Vec<(String, f64)> {
+    /// Auto-finalizes if there are pending documents.
+    pub fn search(&mut self, query: &str, top_k: usize) -> Vec<(String, f64)> {
+        if !self.pending_texts.is_empty() {
+            self.finalize();
+        }
         let query_fp = compute_weighted(query, &self.idf);
 
         let mut results: Vec<(String, f64)> = self.fingerprints.iter()
@@ -241,6 +294,7 @@ impl SimHashIndex {
         self.idf.clear();
         self.doc_count = 0;
         self.df.clear();
+        self.pending_texts.clear();
     }
 
     fn recompute_idf(&mut self) {
