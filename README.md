@@ -229,11 +229,11 @@ All thresholds configurable. Choose 2-tier (simple) or 4-tier (full) during setu
 
 ### What Engram encrypts today vs. what's in development
 
-**Currently encrypted:** AI session logs (`~/.claude/` history, subagent logs, debug traces, session metadata), research artifacts, and any directories you add to scan targets. These are historical records that don't need to be readable every session — they compress, encrypt, and recall on demand.
+**Currently encrypted:** Old AI session logs (`~/.claude/` subagent logs, compressed session data, debug traces). These are archival records — the LLM doesn't read raw session files for context. Instead, Engram's semantic index (keywords, summaries, tier metadata) stays loaded in memory during every session, so search works across all tiers without decrypting anything. Full content is available via `engram recall` when needed. Active session files (current `history.jsonl`, recent logs) stay in hot tier (plaintext) until they age past the configured threshold.
 
-**Working memory (`_memory/`) — in development.** Project memory files (`_memory/daily/`, `_memory/weekly/`, `_memory/archive/`) are the AI's persistent context across sessions. Hooks read these at session start. Encrypting them breaks the context pipeline — the LLM can't load what it can't read, and decrypting dozens of files on every session start adds latency and auth friction.
+**Working memory — in development.** AI working memory files (persistent context the LLM reads across sessions) can't be encrypted yet. Hooks and context loaders read these at session start. Encrypting them breaks the context pipeline — the LLM can't load what it can't read, and decrypting dozens of files on every session start adds latency and auth friction.
 
-This is the harder problem. The retrieval infrastructure is being built to solve it: CoGraph (co-occurrence tracking + spreading activation), the keyword inverted index, HNSW nearest-neighbor graphs, and Reciprocal Rank Fusion allow Engram to know what context is relevant *without* reading every file. Once the retrieval layer can reliably predict which memories the LLM needs for a given session, selective decryption becomes viable — decrypt only the 3-5 files that matter, not all 200+.
+This is the harder problem. The retrieval infrastructure is being built to solve it: CoGraph (co-occurrence tracking + spreading activation), the keyword inverted index, HNSW nearest-neighbor graphs, and Reciprocal Rank Fusion allow Engram to know what context is relevant *without* reading every file. Once the retrieval layer can reliably predict which memories the LLM needs for a given session, selective decryption becomes viable — decrypt only the few files that matter, not all of them.
 
 This requires more testing to ensure the LLM doesn't lose critical context while memory files are encrypted at rest. The goal is encrypted-by-default working memory with retrieval-guided selective decryption. Not there yet.
 
@@ -329,7 +329,7 @@ For the full detailed walkthrough of how every component works — registration,
 
 ```
 engram/
-├── sidecar/                        # Rust crypto + Merkle-Index + CoGraph sidecar (685 KB binary)
+├── sidecar/                        # Rust crypto + Merkle-Index + CoGraph sidecar (670 KB binary)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs                 # Protocol handler, security hardening (mlockall, zero core dumps)
@@ -372,7 +372,7 @@ engram/
 │   ├── SPATIAL-EXTENSION.md        # Spot spatial memory integration
 │   ├── KEY-STORAGE-GUIDE.md        # Key management (Keychain, Vault, YubiKey)
 │   └── blog-post.md                # Launch blog post
-├── tests/                          # 171 tests (+ 18 Rust)
+├── tests/                          # 189 tests (171 Python + 18 Rust)
 │   ├── test_activation.py          # CoGraph: unit, mock, sidecar integration (30 tests)
 │   ├── test_merkle.py              # Merkle tree via Rust sidecar
 │   ├── test_spatial.py             # Spatial memory extension

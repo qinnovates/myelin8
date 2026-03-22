@@ -68,10 +68,10 @@ class TestResolvePrivateKey:
             _resolve_private_key("file:/some/path/key.txt")
 
     def test_env_source(self):
-        os.environ["TEST_TM_PRIVKEY"] = "AGE-SECRET-KEY-1TESTKEY"
+        os.environ["TEST_TM_PRIVKEY"] = "deadbeef01234567890abcdef"
         try:
             result = _resolve_private_key("env:TEST_TM_PRIVKEY")
-            assert result == "AGE-SECRET-KEY-1TESTKEY"
+            assert result == "deadbeef01234567890abcdef"
         finally:
             del os.environ["TEST_TM_PRIVKEY"]
 
@@ -92,8 +92,8 @@ class TestResolvePrivateKey:
             _resolve_private_key("ftp://something")
 
     def test_command_source(self):
-        result = _resolve_private_key("command:echo AGE-SECRET-KEY-1TEST")
-        assert result == "AGE-SECRET-KEY-1TEST"
+        result = _resolve_private_key("command:echo deadbeef01234567890abcdef")
+        assert result == "deadbeef01234567890abcdef"
 
     def test_command_source_failure(self):
         with pytest.raises(EncryptionError, match="failed"):
@@ -109,11 +109,11 @@ class TestAsymmetricKeyConfig:
 
     def test_get_tier_keys(self):
         config = AsymmetricKeyConfig(
-            warm=TierKeyPair(pubkey="age1warmkey"),
-            cold=TierKeyPair(pubkey="age1coldkey"),
+            warm=TierKeyPair(pubkey="mlkem768warmkey"),
+            cold=TierKeyPair(pubkey="mlkem768coldkey"),
         )
-        assert config.get_tier_keys("warm").pubkey == "age1warmkey"
-        assert config.get_tier_keys("cold").pubkey == "age1coldkey"
+        assert config.get_tier_keys("warm").pubkey == "mlkem768warmkey"
+        assert config.get_tier_keys("cold").pubkey == "mlkem768coldkey"
 
     def test_unknown_tier_raises(self):
         config = AsymmetricKeyConfig()

@@ -176,9 +176,15 @@ stdin/stdout line protocol. Python starts the sidecar as a subprocess, sends com
 | `INDEX_SEARCH` | Keyword search with relevance scoring |
 | `INDEX_LOOKUP` | Direct hash lookup (O(1)) |
 | `INDEX_STATS` | Artifact count, keyword count, seal status |
+| `GRAPH_RECORD` | Record artifact access for co-occurrence tracking |
+| `GRAPH_FLUSH` | End session — create co-occurrence edges |
+| `GRAPH_ACTIVATE` | Spreading activation — find related artifacts |
+| `GRAPH_KEYWORD_EDGE` | Add keyword overlap edge |
+| `GRAPH_STATS` | CoGraph node/edge/session counts |
+| `GRAPH_RESET` | Clear the co-occurrence graph |
 
 ### How big is the binary?
-491 KB. Includes ML-KEM-768, X25519, AES-256-GCM, HKDF, SHA3-256, HMAC, Merkle tree, inverted keyword index, and the full protocol handler. Compiled with LTO and strip.
+670 KB. Includes ML-KEM-768, X25519, AES-256-GCM, HKDF, SHA3-256, HMAC, Merkle tree, inverted keyword index, CoGraph, SimHash, and the full protocol handler. Compiled with LTO and strip.
 
 ---
 
@@ -238,10 +244,13 @@ engram/
 │   └── src/
 │       ├── main.rs               # Protocol handler (stdin/stdout)
 │       ├── merkle.rs             # SHA3-256 Merkle tree + inverted keyword index
+│       ├── cograph.rs            # CoGraph: co-occurrence + spreading activation
+│       ├── simhash.rs            # SimHash fingerprinting
 │       ├── crypto.rs             # ML-KEM-768 + X25519 + AES-256-GCM
+│       ├── keystore.rs           # Cross-platform key management
 │       └── keychain.rs           # macOS Keychain integration
 │
-└── tests/                        # 141 tests
+└── tests/                        # 189 tests (171 Python + 18 Rust)
     ├── test_merkle.py            # Merkle tree via sidecar
     ├── test_spatial.py           # Spatial memory
     ├── benchmark_retrieval.py    # Retrieval quality evaluation
@@ -294,6 +303,7 @@ The v1 bottleneck was parsing 8MB of JSON on every invocation. v2 loads the inde
 | Concurrent access race conditions | File locking for metadata writes | Planned (v2 Phase 1) |
 
 ### Has it been security reviewed?
-Yes. Two reviews:
+Yes. Three reviews:
 1. **10-round security audit** (v1.0.1, 2026-03-19): 22 findings, 6 patches applied.
 2. **5-domain architecture review** (v2, 2026-03-21): Applied cryptographer, data security, systems engineer, compliance specialist, red teamer. 5 HIGH findings fixed, 6 MEDIUM addressed.
+3. **CoGraph security audit** (v1.1.0, 2026-03-22): 3 HIGH, 5 MEDIUM findings — all patched. Session buffer DoS cap, Mutex poison recovery, NaN/Inf sanitization, protocol injection guard, side-channel reduction.
