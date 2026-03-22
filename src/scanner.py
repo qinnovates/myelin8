@@ -148,6 +148,32 @@ KNOWN_ARTIFACT_LOCATIONS: dict[str, list[ScanTarget]] = {
             description="GitHub Copilot cache",
         ),
     ],
+    "openclaw": [
+        ScanTarget(
+            path="~/.openclaw",
+            pattern="MEMORY.md",
+            recursive=False,
+            description="OpenClaw persistent memory (facts, preferences, durable context)",
+        ),
+        ScanTarget(
+            path="~/.openclaw/memory",
+            pattern="*.md",
+            recursive=False,
+            description="OpenClaw daily memory notes (YYYY-MM-DD.md)",
+        ),
+        ScanTarget(
+            path="~/.openclaw",
+            pattern="sessions/**/*.jsonl",
+            recursive=True,
+            description="OpenClaw session conversation logs",
+        ),
+        ScanTarget(
+            path="~/.openclaw",
+            pattern="context/**/*",
+            recursive=True,
+            description="OpenClaw context engine artifacts",
+        ),
+    ],
     "generic": [
         ScanTarget(
             path="~/.local/share/ai-memory",

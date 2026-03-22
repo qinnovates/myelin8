@@ -19,7 +19,7 @@
       "python": ">=3.10",
       "platforms": ["darwin", "linux"],
       "optional_dependencies": {
-        "age": ">=1.3.0 (for post-quantum encryption)"
+        "rust": ">=1.70 (for crypto sidecar — engram-vault)"
       }
     }
   },
