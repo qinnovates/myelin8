@@ -32,8 +32,56 @@ pub fn count_files_in_source(source: &Source) -> Result<usize> {
     Ok(glob::glob(&pattern)?.filter_map(|e| e.ok()).count())
 }
 
+/// State tracking: which files have been seen and their mtimes.
+/// Prevents re-ingesting unchanged files.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IngestState {
+    pub seen: std::collections::HashMap<String, SeenFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeenFile {
+    pub mtime: u64,
+    pub content_hash: String,
+}
+
+impl IngestState {
+    pub fn load(state_path: &std::path::Path) -> Self {
+        if state_path.exists() {
+            match std::fs::read_to_string(state_path) {
+                Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+                Err(_) => Self::default(),
+            }
+        } else {
+            Self::default()
+        }
+    }
+
+    pub fn save(&self, state_path: &std::path::Path) -> Result<()> {
+        let tmp = state_path.with_extension("json.tmp");
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(&tmp, &content)?;
+        std::fs::rename(&tmp, state_path)?;
+        Ok(())
+    }
+
+    pub fn is_changed(&self, path: &str, mtime: u64) -> bool {
+        match self.seen.get(path) {
+            Some(seen) => seen.mtime != mtime,
+            None => true, // never seen
+        }
+    }
+
+    pub fn record(&mut self, path: String, mtime: u64, content_hash: String) {
+        self.seen.insert(path, SeenFile { mtime, content_hash });
+    }
+}
+
 /// Scan all registered sources for new/changed files.
-pub fn scan_sources(config: &Config) -> Result<Vec<Artifact>> {
+/// Uses state tracking to skip files that haven't changed since last ingest.
+pub fn scan_sources(config: &Config) -> Result<(Vec<Artifact>, IngestState)> {
+    let state_path = config.data_dir().join("state.json");
+    let mut state = IngestState::load(&state_path);
     let mut artifacts = Vec::new();
 
     for source in &config.sources {
@@ -43,28 +91,56 @@ pub fn scan_sources(config: &Config) -> Result<Vec<Artifact>> {
             .collect();
 
         for path in entries {
+            // Check mtime against state
+            let path_str = path.to_string_lossy().to_string();
+            let mtime = path.metadata()
+                .and_then(|m| m.modified())
+                .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+                .unwrap_or(0);
+
+            if !state.is_changed(&path_str, mtime) {
+                continue; // skip unchanged files
+            }
+
             if let Some(artifact) = ingest_file(&path, &source.label)? {
+                state.record(path_str, mtime, artifact.content_hash.clone());
                 artifacts.push(artifact);
             }
         }
     }
 
-    Ok(artifacts)
+    // Save state after scan
+    state.save(&state_path)?;
+
+    Ok((artifacts, state))
 }
 
 /// Ingest a single file into an Artifact.
 fn ingest_file(path: &Path, label: &str) -> Result<Option<Artifact>> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return Ok(None), // skip binary/unreadable files
+    // Read raw bytes first — hash is computed on EXACT file content
+    let raw_bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return Ok(None), // skip unreadable files
+    };
+
+    // Reject files with null bytes (binary files disguised as text)
+    if raw_bytes.contains(&0x00) {
+        tracing::warn!("Skipping file with null bytes: {}", path.display());
+        return Ok(None);
+    }
+
+    // Hash the raw bytes — this is the permanent content identity
+    let content_hash = hex::encode(Sha256::digest(&raw_bytes));
+
+    // Convert to string (will fail on invalid UTF-8)
+    let content = match std::str::from_utf8(&raw_bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => return Ok(None), // skip non-UTF-8 files
     };
 
     if content.trim().len() < 50 {
         return Ok(None); // skip trivially small files
     }
-
-    let raw_bytes = content.as_bytes();
-    let content_hash = hex::encode(Sha256::digest(raw_bytes));
     let artifact_id = content_hash[..16].to_string();
 
     let metadata = std::fs::metadata(path)?;

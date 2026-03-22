@@ -145,7 +145,7 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
     let store = ParquetStore::new(&data_dir.join("store"));
 
     // Phase 1: Ingest new/changed files
-    let mut new_artifacts = ingest::scan_sources(&config)?;
+    let (mut new_artifacts, _state) = ingest::scan_sources(&config)?;
 
     if new_artifacts.is_empty() {
         println!("No new or changed files found.");

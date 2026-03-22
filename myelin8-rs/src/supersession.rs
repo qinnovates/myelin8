@@ -172,8 +172,18 @@ impl SupersessionIndex {
         }
 
         // Record the supersession relationship
+        // If the old artifact was already superseded by something,
+        // we should supersede that intermediate artifact too (chain: A→B, now B→C)
         if let Some(ref old_id) = supersedes_id {
-            self.superseded_by.insert(old_id.clone(), artifact.artifact_id.clone());
+            // Find the current end of the chain starting from old_id
+            let chain_end = self.resolve_chain(old_id);
+            if chain_end != artifact.artifact_id {
+                self.superseded_by.insert(chain_end, artifact.artifact_id.clone());
+            }
+            // Also mark the original as superseded if not already
+            if !self.superseded_by.contains_key(old_id) {
+                self.superseded_by.insert(old_id.clone(), artifact.artifact_id.clone());
+            }
         }
 
         // Store this artifact's signature and date
