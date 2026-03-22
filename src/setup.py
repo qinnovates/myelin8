@@ -287,6 +287,9 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
             print("  No transitions needed.")
 
     print()
+    # Step 8: Register with AI assistants so they know Engram exists
+    _register_with_ai_assistants()
+
     print("Next steps:")
     if not run_initial_tier:
         print(f"  engram run --dry-run   # Preview tier transitions")
@@ -358,6 +361,9 @@ def run_interactive_setup(config_path: Path) -> EngineConfig:
         tier_policy=policy,
     )
     config.save(config_path)
+
+    # Register with AI assistants
+    _register_with_ai_assistants()
 
     print(f"\nConfig saved: {config_path}")
     print(f"  engram run --dry-run   # Preview")
@@ -435,3 +441,106 @@ def _configure_thresholds() -> TierPolicy:
         cold_to_frozen_age_hours=cold_frozen_age,
         cold_to_frozen_idle_hours=cold_frozen_idle,
     )
+
+
+def _register_with_ai_assistants() -> None:
+    """
+    Register Engram with AI assistants so they know it exists in future sessions.
+
+    This is the fix for: "What's Engram?" — if the AI doesn't know Engram exists,
+    it can't use it. This step wires Engram into the AI's awareness.
+
+    Actions:
+      1. Install the Engram skill globally for Claude Code (~/.claude/skills/engram/)
+      2. Add Engram to Claude Code's global CLAUDE.md (loaded every session)
+      3. Future: register with OpenClaw, Cursor, etc.
+    """
+    import shutil
+
+    print()
+    print("Registering Engram with AI assistants...")
+
+    registered = 0
+
+    # ── Claude Code: install skill globally ──
+    claude_skills_dir = Path.home() / ".claude" / "skills" / "engram"
+    skill_source = Path(__file__).parent.parent / "skills" / "engram" / "SKILL.md"
+
+    if skill_source.exists():
+        claude_skills_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill_source, claude_skills_dir / "SKILL.md")
+        print(f"  Claude Code skill installed: {claude_skills_dir}")
+        registered += 1
+    else:
+        # Skill file not found in package — try pip-installed location
+        try:
+            import importlib.resources
+            # Skip if we can't find the skill
+            pass
+        except Exception:
+            pass
+
+    # ── Claude Code: add to global CLAUDE.md ──
+    claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
+    engram_marker = "## Engram"
+
+    if claude_md_path.exists():
+        existing = claude_md_path.read_text()
+        if engram_marker not in existing:
+            # Append Engram section
+            with open(claude_md_path, "a") as f:
+                f.write(_engram_claude_md_section())
+            print(f"  Claude Code global context updated: {claude_md_path}")
+            registered += 1
+        else:
+            print(f"  Claude Code global context already has Engram")
+            registered += 1
+    else:
+        # Create new global CLAUDE.md
+        claude_md_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(claude_md_path, "w") as f:
+            f.write(f"# Global Context\n\n{_engram_claude_md_section()}")
+        print(f"  Claude Code global context created: {claude_md_path}")
+        registered += 1
+
+    # ── OpenClaw: add to memory if installed ──
+    openclaw_dir = Path.home() / ".openclaw"
+    if openclaw_dir.exists():
+        memory_file = openclaw_dir / "MEMORY.md"
+        if memory_file.exists():
+            existing = memory_file.read_text()
+            if "engram" not in existing.lower():
+                with open(memory_file, "a") as f:
+                    f.write("\n\n## Engram\nInstalled: `pip install bci-engram`. "
+                            "Tiered memory compression with PQC encryption. "
+                            "Run `engram search` to find old sessions, "
+                            "`engram status` to check tier distribution.\n")
+                print(f"  OpenClaw memory updated: {memory_file}")
+                registered += 1
+        else:
+            print(f"  OpenClaw found but no MEMORY.md — skipping")
+
+    if registered:
+        print(f"  Registered with {registered} AI assistant(s)")
+    else:
+        print("  No AI assistants found to register with")
+
+
+def _engram_claude_md_section() -> str:
+    """Generate the Engram section for Claude Code's global CLAUDE.md."""
+    return """
+## Engram
+
+Engram is installed on this system. Brain-modeled tiered AI memory with PQC encryption.
+
+| Command | What |
+|---------|------|
+| `engram search <query>` | Search all tiers without decompressing |
+| `engram status` | Show tier distribution and compression stats |
+| `engram recall <path>` | Decompress a cold/frozen artifact back to hot |
+| `engram verify` | Check integrity of all tracked artifacts |
+| `engram context --query <q>` | Get token-budget-optimized memory block |
+| `engram run` | Execute tier transitions (compress old sessions) |
+
+Repo: `qinnovates/engram`. Local: check `~/.engram/` for config and data.
+"""
