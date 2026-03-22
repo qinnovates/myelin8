@@ -2,9 +2,12 @@ mod cli;
 mod config;
 mod ingest;
 mod index;
+mod mcp;
+mod semantic;
 mod store;
 mod search;
 mod recall;
+mod supersession;
 mod tiers;
 mod integrity;
 
@@ -28,5 +31,9 @@ fn main() -> Result<()> {
         Command::Verify => cli::verify(config),
         Command::Pin { query } => cli::pin(config, query),
         Command::Remove { label } => cli::remove(config, label),
+        Command::McpServe => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(mcp::serve(config))
+        }
     }
 }

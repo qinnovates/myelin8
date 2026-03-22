@@ -9,6 +9,7 @@ use crate::index::SearchIndex;
 use crate::store::ParquetStore;
 use crate::search;
 use crate::recall;
+use crate::supersession::{SupersessionConfig, SupersessionIndex};
 use crate::tiers;
 use crate::integrity;
 
@@ -81,6 +82,10 @@ pub enum Command {
         /// Label of the source to remove
         label: String,
     },
+
+    /// Start the MCP (Model Context Protocol) server for AI assistant integration
+    #[command(name = "mcp-serve")]
+    McpServe,
 }
 
 pub fn init(config: Config) -> Result<()> {
@@ -140,11 +145,32 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
     let store = ParquetStore::new(&data_dir.join("store"));
 
     // Phase 1: Ingest new/changed files
-    let new_artifacts = ingest::scan_sources(&config)?;
+    let mut new_artifacts = ingest::scan_sources(&config)?;
 
     if new_artifacts.is_empty() {
         println!("No new or changed files found.");
         return Ok(());
+    }
+
+    // Phase 1.5: Detect temporal supersession
+    let mut sup_index = SupersessionIndex::new();
+
+    // Load existing supersession state if available
+    let sup_path = data_dir.join("supersession.json");
+    if sup_path.exists() {
+        let sup_json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&sup_path)?)?;
+        sup_index.load_from_json(&sup_json);
+    }
+
+    // Sort artifacts by date so older ones register first
+    new_artifacts.sort_by(|a, b| a.created_date.cmp(&b.created_date));
+
+    let mut supersession_count = 0;
+    for artifact in &mut new_artifacts {
+        if let Some(old_id) = sup_index.register(artifact) {
+            artifact.supersedes = Some(old_id.clone());
+            supersession_count += 1;
+        }
     }
 
     let pb = ProgressBar::new(new_artifacts.len() as u64);
@@ -159,8 +185,13 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
         pb.set_message(format!("{}", artifact.source_label));
 
         if dry_run {
-            pb.println(format!("  [dry-run] Would ingest: {} ({})",
-                artifact.artifact_id, artifact.source_label));
+            let sup_note = if let Some(ref old_id) = artifact.supersedes {
+                format!(" (supersedes {})", old_id)
+            } else {
+                String::new()
+            };
+            pb.println(format!("  [dry-run] Would ingest: {} ({}){}",
+                artifact.artifact_id, artifact.source_label, sup_note));
         } else {
             // Index in tantivy (summary + keywords + metadata stored)
             index.add_artifact(artifact)?;
@@ -178,6 +209,10 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
 
     if !dry_run {
         index.commit()?;
+
+        // Persist supersession state
+        let sup_json = serde_json::to_string_pretty(&sup_index.to_json())?;
+        std::fs::write(&sup_path, &sup_json)?;
     }
 
     // Phase 2: Compact aged hot files to Parquet
@@ -188,8 +223,8 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
     };
 
     println!();
-    println!("Processed {} artifacts. {} new, {} skipped, {} compacted to Parquet.",
-        new_artifacts.len(), ingested, skipped, compacted);
+    println!("Processed {} artifacts. {} new, {} skipped, {} compacted to Parquet, {} supersessions detected.",
+        new_artifacts.len(), ingested, skipped, compacted, supersession_count);
 
     Ok(())
 }
@@ -198,7 +233,31 @@ pub fn search(config: Config, query: String, after: Option<String>, before: Opti
     let data_dir = config.data_dir();
     let index = SearchIndex::open_or_create(&data_dir.join("index"))?;
 
-    let results = index.search(&query, after.as_deref(), before.as_deref(), limit)?;
+    // Fetch more results than requested so supersession filtering has room to work
+    let fetch_limit = limit * 3;
+    let raw_results = index.search(&query, after.as_deref(), before.as_deref(), fetch_limit)?;
+
+    if raw_results.is_empty() {
+        println!("No results found.");
+        return Ok(());
+    }
+
+    // Apply supersession filtering
+    let mut sup_index = SupersessionIndex::new();
+    let sup_path = data_dir.join("supersession.json");
+    if sup_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&sup_path) {
+            if let Ok(sup_json) = serde_json::from_str::<serde_json::Value>(&content) {
+                sup_index.load_from_json(&sup_json);
+            }
+        }
+    }
+
+    let sup_config = SupersessionConfig::default(); // hide_superseded = true
+    let results: Vec<_> = sup_index.filter_results(raw_results, &sup_config)
+        .into_iter()
+        .take(limit)
+        .collect();
 
     if results.is_empty() {
         println!("No results found.");
@@ -206,11 +265,13 @@ pub fn search(config: Config, query: String, after: Option<String>, before: Opti
     }
 
     for (i, result) in results.iter().enumerate() {
-        println!("{}. [{}] ({}) {}",
+        let sup_marker = if result.superseded { " [SUPERSEDED]" } else { "" };
+        println!("{}. [{}] ({}) {}{}",
             i + 1,
             result.created_date,
             result.source_label,
-            result.summary);
+            result.summary,
+            sup_marker);
         println!("   significance: {:.2} | hash: {}",
             result.significance, &result.content_hash[..16]);
         println!();

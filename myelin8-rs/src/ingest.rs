@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::config::{Config, Source};
+use crate::semantic::{self, SemanticFields};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
@@ -18,6 +19,11 @@ pub struct Artifact {
     pub source_path: String,
     pub created_date: String,
     pub original_size: u64,
+    /// If this artifact supersedes an older one, this holds the old artifact_id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<String>,
+    /// Semantic KV metadata extracted at ingest time
+    pub semantic: SemanticFields,
 }
 
 /// Count files matching a source's pattern.
@@ -67,6 +73,8 @@ fn ingest_file(path: &Path, label: &str) -> Result<Option<Artifact>> {
         .format("%Y-%m-%d")
         .to_string();
 
+    let semantic_fields = semantic::extract(&content);
+
     Ok(Some(Artifact {
         artifact_id,
         content: content.clone(),
@@ -78,6 +86,8 @@ fn ingest_file(path: &Path, label: &str) -> Result<Option<Artifact>> {
         source_path: path.to_string_lossy().to_string(),
         created_date,
         original_size: raw_bytes.len() as u64,
+        supersedes: None, // set by SupersessionIndex during ingest
+        semantic: semantic_fields,
     }))
 }
 

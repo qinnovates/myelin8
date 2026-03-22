@@ -6,6 +6,7 @@ use tantivy::schema::*;
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy};
 
 use crate::ingest::Artifact;
+use crate::semantic;
 
 pub struct SearchResult {
     pub artifact_id: String,
@@ -15,6 +16,10 @@ pub struct SearchResult {
     pub created_date: String,
     pub source_label: String,
     pub score: f32,
+    /// True if this artifact has been superseded by a newer one.
+    pub superseded: bool,
+    /// The artifact_id that supersedes this one, if any.
+    pub superseded_by: Option<String>,
 }
 
 pub struct IndexStats {
@@ -35,6 +40,14 @@ pub struct SearchIndex {
     f_significance: Field,
     f_created_date: Field,
     f_source_label: Field,
+    f_supersedes: Field,
+    // Semantic KV fields
+    f_technology: Field,
+    f_category: Field,
+    f_action: Field,
+    f_domain: Field,
+    f_polarity: Field,
+    f_entities: Field,
 }
 
 impl SearchIndex {
@@ -51,6 +64,15 @@ impl SearchIndex {
         let f_significance = schema_builder.add_f64_field("significance", INDEXED | STORED | FAST);
         let f_created_date = schema_builder.add_text_field("created_date", STRING | STORED | FAST);
         let f_source_label = schema_builder.add_text_field("source_label", STRING | STORED);
+        let f_supersedes = schema_builder.add_text_field("supersedes", STRING | STORED);
+
+        // Semantic KV fields: TEXT for full-text search, STORED for retrieval
+        let f_technology = schema_builder.add_text_field("technology", TEXT | STORED);
+        let f_category = schema_builder.add_text_field("category", TEXT | STORED);
+        let f_action = schema_builder.add_text_field("action", TEXT | STORED);
+        let f_domain = schema_builder.add_text_field("domain", TEXT | STORED);
+        let f_polarity = schema_builder.add_text_field("polarity", STRING | STORED);
+        let f_entities = schema_builder.add_text_field("entities", TEXT | STORED);
 
         let schema = schema_builder.build();
 
@@ -77,6 +99,13 @@ impl SearchIndex {
             f_significance,
             f_created_date,
             f_source_label,
+            f_supersedes,
+            f_technology,
+            f_category,
+            f_action,
+            f_domain,
+            f_polarity,
+            f_entities,
         })
     }
 
@@ -97,7 +126,16 @@ impl SearchIndex {
         let f_sig = self.f_significance;
         let f_date = self.f_created_date;
         let f_label = self.f_source_label;
+        let f_sup = self.f_supersedes;
+        let f_tech = self.f_technology;
+        let f_cat = self.f_category;
+        let f_act = self.f_action;
+        let f_dom = self.f_domain;
+        let f_pol = self.f_polarity;
+        let f_ent = self.f_entities;
 
+        let supersedes_val = artifact.supersedes.clone().unwrap_or_default();
+        let sem = &artifact.semantic;
         let writer = self.ensure_writer()?;
 
         writer.add_document(doc!(
@@ -108,6 +146,13 @@ impl SearchIndex {
             f_sig => artifact.significance as f64,
             f_date => artifact.created_date.clone(),
             f_label => artifact.source_label.clone(),
+            f_sup => supersedes_val,
+            f_tech => semantic::join_field(&sem.technology),
+            f_cat => semantic::join_field(&sem.category),
+            f_act => semantic::join_field(&sem.action),
+            f_dom => semantic::join_field(&sem.domain),
+            f_pol => sem.polarity.clone(),
+            f_ent => semantic::join_field(&sem.entities),
         ))?;
 
         Ok(())
@@ -129,8 +174,24 @@ impl SearchIndex {
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
         let searcher = self.reader.searcher();
-        let query_parser = QueryParser::for_index(&self.index, vec![self.f_body, self.f_summary]);
-        let query = query_parser.parse_query(query_str)?;
+
+        // Search across body, summary, and all semantic fields
+        let query_parser = QueryParser::for_index(
+            &self.index,
+            vec![
+                self.f_body,
+                self.f_summary,
+                self.f_technology,
+                self.f_category,
+                self.f_action,
+                self.f_domain,
+                self.f_entities,
+            ],
+        );
+
+        // Expand query terms using synonym map before searching
+        let expanded = semantic::expand_query(query_str);
+        let query = query_parser.parse_query(&expanded)?;
 
         // TODO: add date range filtering with BooleanQuery when after/before provided
 
@@ -172,6 +233,8 @@ impl SearchIndex {
                 created_date,
                 source_label,
                 score,
+                superseded: false,
+                superseded_by: None,
             });
         }
 
