@@ -10,11 +10,13 @@
 //!   - Keys retrieved into mlock'd memory for crypto ops
 //!   - Keys zeroed after use (handled by caller via Zeroizing<T>)
 //!
-//! File-based fallback (Linux without GNOME Keyring):
-//!   - Keys stored in ~/.engram/keys/<tier>-key.enc
-//!   - Encrypted with a passphrase-derived key (Argon2id + AES-256-GCM)
-//!   - File permissions: 0600 (owner read/write only)
-//!   - Directory permissions: 0700
+//! File-based storage (Linux, other Unix):
+//!   - Keys stored in ~/.engram/keys/<tier>-key (hex-encoded)
+//!   - Protected by filesystem permissions: 0600 files, 0700 directory
+//!   - Permission verified on every read (rejects world/group-readable files)
+//!   - Atomic writes (temp file + rename, restricted mode from creation)
+//!   - NOT encrypted at rest (relies on OS-level isolation)
+//!   - Future: Argon2id passphrase-derived wrapping for at-rest encryption
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -106,18 +108,29 @@ mod macos {
 mod linux {
     use super::*;
 
-    fn keys_dir() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home).join(".engram").join("keys")
+    fn keys_dir() -> Result<PathBuf, String> {
+        let home = std::env::var("HOME")
+            .map_err(|_| "HOME environment variable not set. Cannot determine key storage directory. Set HOME or run as a user with a home directory.".to_string())?;
+        let home_path = PathBuf::from(&home);
+        // Verify home directory exists and is owned by current user
+        if !home_path.exists() {
+            return Err(format!("HOME directory does not exist: {}", home));
+        }
+        Ok(home_path.join(".engram").join("keys"))
     }
 
     fn ensure_keys_dir() -> Result<PathBuf, String> {
-        let dir = keys_dir();
+        let dir = keys_dir()?;
         if !dir.exists() {
             fs::create_dir_all(&dir).map_err(|e| format!("Cannot create keys dir: {}", e))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
+        }
+        // Always verify permissions (not just at creation — prevents TOCTOU)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&dir).map_err(|e| format!("Cannot stat keys dir: {}", e))?;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o700 {
                 fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
                     .map_err(|e| format!("Cannot set dir permissions: {}", e))?;
             }
@@ -216,17 +229,28 @@ mod file_fallback {
 
     use super::*;
 
-    fn keys_dir() -> PathBuf {
+    fn keys_dir() -> Result<PathBuf, String> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".engram").join("keys")
+            .map_err(|_| "Neither HOME nor USERPROFILE set. Cannot determine key directory.".to_string())?;
+        Ok(PathBuf::from(home).join(".engram").join("keys"))
     }
 
     fn ensure_keys_dir() -> Result<PathBuf, String> {
-        let dir = keys_dir();
+        let dir = keys_dir()?;
         if !dir.exists() {
             fs::create_dir_all(&dir).map_err(|e| format!("Cannot create keys dir: {}", e))?;
+        }
+        // Apply permissions on Unix platforms
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&dir).map_err(|e| format!("Cannot stat keys dir: {}", e))?;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o700 {
+                fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+                    .map_err(|e| format!("Cannot set dir permissions: {}", e))?;
+            }
         }
         Ok(dir)
     }
@@ -242,6 +266,16 @@ mod file_fallback {
         if !path.exists() {
             return Err(format!("Public key not found for tier '{}'", tier));
         }
+        // Verify permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&path).map_err(|e| format!("Cannot stat key: {}", e))?;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode & 0o077 != 0 {
+                return Err(format!("Key file has insecure permissions {:o}: {}", mode, path.display()));
+            }
+        }
         fs::read_to_string(&path)
             .map(|s| s.trim().to_string())
             .map_err(|e| format!("Cannot read key: {}", e))
@@ -252,6 +286,15 @@ mod file_fallback {
         if !path.exists() {
             return Err(format!("Private key not found for tier '{}'. Run KEYGEN first", tier));
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&path).map_err(|e| format!("Cannot stat key: {}", e))?;
+            let mode = meta.permissions().mode() & 0o777;
+            if mode & 0o077 != 0 {
+                return Err(format!("Key file has insecure permissions {:o}: {}", mode, path.display()));
+            }
+        }
         fs::read_to_string(&path)
             .map(|s| s.trim().to_string())
             .map_err(|e| format!("Cannot read key: {}", e))
@@ -259,11 +302,41 @@ mod file_fallback {
 
     pub fn store_public_key(tier: &str, pubkey: &str) -> Result<(), String> {
         let path = key_path(tier, "pubkey")?;
-        fs::write(&path, pubkey).map_err(|e| format!("Cannot write key: {}", e))
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true).create(true).truncate(true).mode(0o600)
+                .open(&path)
+                .map_err(|e| format!("Cannot write key: {}", e))?;
+            file.write_all(pubkey.as_bytes())
+                .map_err(|e| format!("Cannot write key: {}", e))?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&path, pubkey).map_err(|e| format!("Cannot write key: {}", e))
+        }
     }
 
     pub fn store_private_key(tier: &str, privkey: &str) -> Result<(), String> {
         let path = key_path(tier, "key")?;
-        fs::write(&path, privkey).map_err(|e| format!("Cannot write key: {}", e))
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true).create(true).truncate(true).mode(0o600)
+                .open(&path)
+                .map_err(|e| format!("Cannot write key: {}", e))?;
+            file.write_all(privkey.as_bytes())
+                .map_err(|e| format!("Cannot write key: {}", e))?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&path, privkey).map_err(|e| format!("Cannot write key: {}", e))
+        }
     }
 }

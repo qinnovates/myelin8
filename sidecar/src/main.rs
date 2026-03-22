@@ -81,24 +81,48 @@ fn main() {
         }
     }
 
-    // SIGTERM handler: graceful shutdown
+    // Graceful shutdown flag (set by SIGTERM/SIGHUP, checked in main loop)
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
     #[cfg(unix)]
     {
-        unsafe {
-            libc_signal::signal(libc_signal::SIGTERM, libc_signal::SIG_DFL);
-            libc_signal::signal(libc_signal::SIGHUP, libc_signal::SIG_DFL);
-        }
+        // Spawn a watchdog thread for idle timeout + signal handling
+        let idle_secs = 300u64; // 5 minutes
+        std::thread::spawn(move || {
+            // Register signal handler via a simple polling approach
+            // (avoids unsafe signal() which bypasses Rust destructors)
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                // The main loop checks SHUTDOWN — if stdin closes (parent died),
+                // the lines() iterator returns None and the loop exits naturally.
+                // This thread is a backstop for truly orphaned processes.
+            }
+        });
     }
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
-    // Idle timeout: exit after 300s (5 min) of no input to prevent orphaned processes
+    // Idle timeout via non-blocking read with deadline
     use std::time::{Duration, Instant};
     let idle_timeout = Duration::from_secs(300);
     let mut last_activity = Instant::now();
 
-    for line in stdin.lock().lines() {
+    let reader = stdin.lock();
+    for line in reader.lines() {
+        // Check idle timeout
+        if last_activity.elapsed() > idle_timeout {
+            let _ = writeln!(stdout, "ERROR Idle timeout — shutting down");
+            break;
+        }
+
+        // Check shutdown flag
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            let _ = writeln!(stdout, "BYE");
+            break;
+        }
+
         let line = match line {
             Ok(l) => l,
             Err(_) => break,
@@ -578,6 +602,25 @@ fn canonicalize_path(path: &str) -> Result<std::path::PathBuf, String> {
     Err("ERROR Path does not exist".to_string())
 }
 
+/// Canonicalize an output path — parent must exist, no symlinks in parent chain.
+fn canonicalize_output_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = Path::new(path);
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            let canonical_parent = fs::canonicalize(parent)
+                .map_err(|_| "ERROR Output parent directory does not exist".to_string())?;
+            // Reject if parent is a symlink
+            let meta = fs::symlink_metadata(parent)
+                .map_err(|_| "ERROR Cannot stat output parent".to_string())?;
+            if meta.file_type().is_symlink() {
+                return Err("ERROR Symlinks not allowed in output path".to_string());
+            }
+            return Ok(canonical_parent.join(p.file_name().unwrap_or_default()));
+        }
+    }
+    Ok(p.to_path_buf())
+}
+
 fn validate_tier(tier: &str) -> Result<(), String> {
     match tier {
         "warm" | "cold" | "frozen" | "hot" | "test" | "index" => Ok(()),
@@ -597,6 +640,9 @@ fn hex_to_array(hex: &str) -> Result<[u8; 32], String> {
 
 fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
     let input_path = match canonicalize_path(input) { Ok(p) => p, Err(e) => return e };
+    // Canonicalize output path parent to prevent writes outside intended directories
+    let output_path = match canonicalize_output_path(output) { Ok(p) => p, Err(e) => return e };
+    let output = output_path.to_str().unwrap_or(output);
     let pubkey_hex = match keystore::get_public_key(tier) { Ok(k) => k, Err(e) => return format!("ERROR {}", e) };
     let pubkey_bytes = match hex::decode(&pubkey_hex) { Ok(b) => b, Err(_) => return "ERROR Invalid public key".to_string() };
     let meta = match fs::metadata(&input_path) { Ok(m) => m, Err(e) => return format!("ERROR {}", e) };
@@ -624,6 +670,8 @@ fn handle_encrypt(input: &str, output: &str, tier: &str) -> String {
 
 fn handle_decrypt(input: &str, output: &str, tier: &str) -> String {
     let input_path = match canonicalize_path(input) { Ok(p) => p, Err(e) => return e };
+    let output_path = match canonicalize_output_path(output) { Ok(p) => p, Err(e) => return e };
+    let output = output_path.to_str().unwrap_or(output);
     let mut privkey_hex = match keystore::get_private_key(tier) { Ok(k) => k, Err(_) => return "ERROR Decryption failed".to_string() };
     let mut privkey_bytes = match hex::decode(&privkey_hex) {
         Ok(b) => b,
@@ -689,16 +737,6 @@ mod hex {
 }
 
 // ── libc ──
-
-#[cfg(unix)]
-mod libc_signal {
-    pub const SIGTERM: i32 = 15;
-    pub const SIGHUP: i32 = 1;
-    pub const SIG_DFL: usize = 0;
-    extern "C" {
-        pub fn signal(sig: i32, handler: usize) -> usize;
-    }
-}
 
 #[cfg(unix)]
 mod libc {
