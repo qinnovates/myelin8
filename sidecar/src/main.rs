@@ -38,11 +38,24 @@ use zeroize::Zeroize;
 mod crypto;
 mod keychain;
 mod merkle;
+mod simhash;
 
 const MAX_FILE_SIZE: u64 = 256 * 1024 * 1024;
 
 use std::sync::Mutex;
 static MERKLE_INDEX: Mutex<Option<merkle::MerkleIndex>> = Mutex::new(None);
+static SIMHASH_INDEX: Mutex<Option<simhash::SimHashIndex>> = Mutex::new(None);
+
+fn with_simhash<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut simhash::SimHashIndex) -> R,
+{
+    let mut guard = SIMHASH_INDEX.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(simhash::SimHashIndex::new());
+    }
+    f(guard.as_mut().unwrap())
+}
 
 fn with_index<F, R>(f: F) -> R
 where
@@ -223,6 +236,27 @@ fn main() {
             "INDEX_STATS" => {
                 handle_index_stats()
             }
+            "SIMHASH_SEARCH" => {
+                // SimHash-only search (bypass keyword, pure semantic fingerprint)
+                if rest.is_empty() {
+                    "ERROR Usage: SIMHASH_SEARCH <query>".to_string()
+                } else {
+                    let results = with_simhash(|sh| sh.search(rest, 10));
+                    let json: Vec<String> = results.iter()
+                        .map(|(hash, sim)| format!(r#"{{"hash":"{}","similarity":{:.4}}}"#, hash, sim))
+                        .collect();
+                    format!("OK [{}]", json.join(","))
+                }
+            }
+            "SIMHASH_FINGERPRINT" => {
+                // Compute SimHash fingerprint without storing
+                if rest.is_empty() {
+                    "ERROR Usage: SIMHASH_FINGERPRINT <text>".to_string()
+                } else {
+                    let fp = simhash::compute(rest);
+                    format!("OK {}", simhash::hex_encode(&fp))
+                }
+            }
 
             _ => "ERROR Unknown command".to_string(),
         };
@@ -261,6 +295,13 @@ fn handle_index_add(json_str: &str) -> String {
                 section_headers: val.get_str_array("sections"),
             };
 
+            // Add to SimHash index (summary + keywords as text)
+            let simhash_text = format!("{} {}",
+                val.get_str("summary").unwrap_or(""),
+                val.get_str_array("keywords").join(" ")
+            );
+            with_simhash(|sh| sh.add(hash_hex, &simhash_text));
+
             match with_index(|idx| idx.add_artifact(payload)) {
                 Ok(i) => format!("OK {}", i),
                 Err(e) => format!("ERROR {}", e),
@@ -271,7 +312,40 @@ fn handle_index_add(json_str: &str) -> String {
 }
 
 fn handle_index_search(query: &str) -> String {
-    let results = with_index(|idx| idx.search(query));
+    // ═══ Fused search: keyword index + SimHash, merged via RRF ═══
+
+    // 1. Keyword search (from Merkle-Index)
+    let keyword_results = with_index(|idx| idx.search(query));
+
+    // 2. SimHash search (semantic fingerprint similarity)
+    let simhash_results = with_simhash(|sh| sh.search(query, 20));
+
+    // 3. Reciprocal Rank Fusion (k=60, standard constant)
+    let rrf_k = 60.0;
+    let mut fused_scores: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+
+    // Keyword results contribute to RRF
+    for (rank, result) in keyword_results.iter().enumerate() {
+        let hash = merkle::hex_encode(&result.payload.content_hash);
+        *fused_scores.entry(hash).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+    }
+
+    // SimHash results contribute to RRF
+    for (rank, (hash, _sim)) in simhash_results.iter().enumerate() {
+        *fused_scores.entry(hash.clone()).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+    }
+
+    // Sort by fused score, take top 20
+    let mut ranked: Vec<(String, f64)> = fused_scores.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.truncate(20);
+
+    // Look up payloads and proofs for the fused results
+    let results: Vec<merkle::SearchResult> = ranked.iter()
+        .filter_map(|(hash, _)| {
+            with_index(|idx| idx.lookup_hex(hash).ok().flatten())
+        })
+        .collect();
 
     // Format as JSON array
     let json_results: Vec<String> = results.iter().map(|r| {
@@ -310,10 +384,11 @@ fn handle_index_lookup(hex: &str) -> String {
 
 fn handle_index_stats() -> String {
     let stats = with_index(|idx| idx.stats());
+    let simhash_count = with_simhash(|sh| sh.len());
     format!(
-        r#"OK {{"version":{},"artifacts":{},"leaves":{},"keywords":{},"keyword_refs":{},"sealed":{},"manifest":{}}}"#,
+        r#"OK {{"version":{},"artifacts":{},"leaves":{},"keywords":{},"keyword_refs":{},"simhash_fingerprints":{},"sealed":{},"manifest":{}}}"#,
         stats.version, stats.artifact_count, stats.leaf_count,
-        stats.keyword_entries, stats.keyword_refs, stats.has_seal, stats.has_manifest,
+        stats.keyword_entries, stats.keyword_refs, simhash_count, stats.has_seal, stats.has_manifest,
     )
 }
 
