@@ -149,7 +149,7 @@ pub fn run(config: Config, dry_run: bool) -> Result<()> {
 
     if new_artifacts.is_empty() {
         println!("No new or changed files found.");
-        return Ok(());
+        // Don't return — still need to run compaction on aged hot files
     }
 
     // Phase 1.5: Detect temporal supersession
