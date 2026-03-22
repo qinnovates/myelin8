@@ -153,7 +153,7 @@ def vault_memory():
         yield mem
         client.close()
     except Exception:
-        pytest.skip("engram-vault sidecar not available")
+        pytest.skip("myelin8-vault sidecar not available")
 
 
 class TestSpatialMerkle:

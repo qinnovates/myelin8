@@ -1,4 +1,4 @@
-# Engram v2: Full Architecture Proposal
+# Myelin8 v2: Full Architecture Proposal
 
 ## Table of Contents
 
@@ -6,8 +6,8 @@
 - [System Diagram](#system-diagram)
 - [Data Flow: Search (80% of cases — no decompression needed)](#data-flow-search-80-of-cases-no-decompression-needed)
 - [Data Flow: Full Recall (20% of cases — decompression needed)](#data-flow-full-recall-20-of-cases-decompression-needed)
-- [Data Flow: Registration (on `engram scan`)](#data-flow-registration-on-engram-scan)
-- [Data Flow: Tier Transition (on `engram run`)](#data-flow-tier-transition-on-engram-run)
+- [Data Flow: Registration (on `myelin8 scan`)](#data-flow-registration-on-myelin8-scan)
+- [Data Flow: Tier Transition (on `myelin8 run`)](#data-flow-tier-transition-on-myelin8-run)
 - [Memory Architecture (How It Maps to the Brain)](#memory-architecture-how-it-maps-to-the-brain)
 - [Performance Model](#performance-model)
   - [Measured baseline (v1, 4,560 artifacts)](#measured-baseline-v1-4560-artifacts)
@@ -50,16 +50,16 @@ Proposed: Rust owns the data AND the keys. Python is a thin CLI. Every search is
 ┌──────────────────────────────────────────────────────────────┐
 │                   Python CLI (thin wrapper)                    │
 │                                                               │
-│  engram search "auth"  →  vault.index_search("auth")          │
-│  engram recall <hash>  →  vault.index_lookup(<hash>)          │
-│  engram recall --section decisions  →  decompress + split     │
+│  myelin8 search "auth"  →  vault.index_search("auth")          │
+│  myelin8 recall <hash>  →  vault.index_lookup(<hash>)          │
+│  myelin8 recall --section decisions  →  decompress + split     │
 │                                                               │
 │  No JSON parsing. No index loading. Just IPC to sidecar.      │
 └──────────────────────┬───────────────────────────────────────┘
                        │ stdin/stdout IPC (0.15ms round-trip)
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
-│              Rust Sidecar (engram-vault)                       │
+│              Rust Sidecar (myelin8-vault)                       │
 │              ══════════════════════════                        │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐ │
@@ -104,9 +104,9 @@ Proposed: Rust owns the data AND the keys. Python is a thin CLI. Every search is
 │                   Tiered Storage (disk)                        │
 │                                                               │
 │  HOT     ~/.claude/sessions/*.jsonl           uncompressed    │
-│  WARM    ~/.engram/warm/*.jsonl.zst           zstd-3          │
-│  COLD    ~/.engram/cold/*.jsonl.zst           zstd-9 + strip  │
-│  FROZEN  ~/.engram/frozen/*.parquet           columnar + delta │
+│  WARM    ~/.myelin8/warm/*.jsonl.zst           zstd-3          │
+│  COLD    ~/.myelin8/cold/*.jsonl.zst           zstd-9 + strip  │
+│  FROZEN  ~/.myelin8/frozen/*.parquet           columnar + delta │
 │                                                               │
 │  Each file optionally encrypted: AES-256-GCM envelope         │
 │  Decryption only on explicit recall (not on search)           │
@@ -167,7 +167,7 @@ Claude: "Show me the actual code changes from that auth session"
 Python: vault.index_lookup(h1) → payload says tier="cold", has section "code"
   │
   ▼
-Python: engram recall <path> --section code
+Python: myelin8 recall <path> --section code
   │
   ▼
   1. Read compressed file from disk               1-5ms (SSD)
@@ -186,7 +186,7 @@ on the discussion/background sections.
 
 ---
 
-## Data Flow: Registration (on `engram scan`)
+## Data Flow: Registration (on `myelin8 scan`)
 
 ```
 New session file detected
@@ -215,10 +215,10 @@ Python:
 
 ---
 
-## Data Flow: Tier Transition (on `engram run`)
+## Data Flow: Tier Transition (on `myelin8 run`)
 
 ```
-engram run (age + idle thresholds)
+myelin8 run (age + idle thresholds)
   │
   ▼
 For each artifact past threshold:
@@ -290,16 +290,16 @@ The sidecar (hippocampus) holds pointers and summaries. The disk (neocortex) hol
 
 | Operation | Latency | Bottleneck |
 |---|---|---|
-| `engram search` | ~65ms | JSON parse (40ms) + Python startup (25ms) |
-| `engram recall` (warm) | ~75ms | JSON parse (40ms) + decompress (10ms) + Python (25ms) |
-| `engram recall` (cold) | ~565ms | JSON parse (40ms) + decompress (500ms) + Python (25ms) |
-| `engram recall` (frozen) | ~5065ms | JSON parse (40ms) + Parquet restore (5000ms) + Python (25ms) |
+| `myelin8 search` | ~65ms | JSON parse (40ms) + Python startup (25ms) |
+| `myelin8 recall` (warm) | ~75ms | JSON parse (40ms) + decompress (10ms) + Python (25ms) |
+| `myelin8 recall` (cold) | ~565ms | JSON parse (40ms) + decompress (500ms) + Python (25ms) |
+| `myelin8 recall` (frozen) | ~5065ms | JSON parse (40ms) + Parquet restore (5000ms) + Python (25ms) |
 
 ### Projected v2 (sidecar holds index)
 
 | Operation | Latency | Why |
 |---|---|---|
-| `engram search` | ~0.5ms | Sidecar IPC (0.15ms) + keyword lookup (0.01ms) + proof (0.03ms) + Python thin wrapper |
+| `myelin8 search` | ~0.5ms | Sidecar IPC (0.15ms) + keyword lookup (0.01ms) + proof (0.03ms) + Python thin wrapper |
 | Summary recall (any tier) | ~0.5ms | Same as search — summary is in sidecar memory |
 | Section recall (warm) | ~12ms | Sidecar lookup (0.5ms) + decompress (10ms) + section split (0.1ms) |
 | Section recall (cold) | ~205ms | Sidecar lookup (0.5ms) + decompress (200ms) + section split (0.1ms) |
@@ -351,8 +351,8 @@ Day 1: Rust
 
 Day 2: Python + Integration
   - VaultClient: index_search(), index_lookup(), index_stats()
-  - CLI: route `engram search` through sidecar when running
-  - CLI: add `--section` flag to `engram recall`
+  - CLI: route `myelin8 search` through sidecar when running
+  - CLI: add `--section` flag to `myelin8 recall`
   - SessionStart hook: call INDEX_LOAD to warm sidecar
 
 Day 3: Test + Benchmark
@@ -375,7 +375,7 @@ Day 3: Test + Benchmark
 
 ```
   - Section regex patterns for common artifact formats
-  - `engram recall --section decisions` decompresses and splits
+  - `myelin8 recall --section decisions` decompresses and splits
   - Merkle proof covers full artifact (section is a verified substring)
 ```
 
@@ -390,7 +390,7 @@ Day 3: Test + Benchmark
 
 ## Success Criteria
 
-1. `engram search` < 1ms on 4,560 artifacts (currently 65ms)
+1. `myelin8 search` < 1ms on 4,560 artifacts (currently 65ms)
 2. Every search result includes a valid Merkle proof
 3. Summary recall never touches disk
 4. Section recall returns only the requested section

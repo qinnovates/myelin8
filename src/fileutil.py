@@ -25,8 +25,8 @@ MAX_INDEX_BYTES = 102_400
 # Maximum decompression output (500MB — bomb protection)
 MAX_DECOMPRESS_BYTES = 500 * 1024 * 1024
 
-# Default engram directory
-ENGRAM_DIR = "~/.engram"
+# Default myelin8 directory
+MYELIN8_DIR = "~/.myelin8"
 
 
 def atomic_write_text(path: Path, content: str,
@@ -40,7 +40,7 @@ def atomic_write_text(path: Path, content: str,
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(
-        suffix=".tmp", dir=str(path.parent), prefix=".engram-"
+        suffix=".tmp", dir=str(path.parent), prefix=".myelin8-"
     )
     os.fchmod(fd, permissions)  # SECURITY: restrict BEFORE writing content
     tmp = Path(tmp_str)
@@ -60,7 +60,7 @@ def atomic_write_bytes(path: Path, content: bytes,
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(
-        suffix=".tmp", dir=str(path.parent), prefix=".engram-"
+        suffix=".tmp", dir=str(path.parent), prefix=".myelin8-"
     )
     os.fchmod(fd, permissions)  # SECURITY: restrict BEFORE writing content
     tmp = Path(tmp_str)

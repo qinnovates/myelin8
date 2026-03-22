@@ -96,7 +96,7 @@ def _get_model(model_name: str = DEFAULT_MODEL, allow_network: bool = False):
     Args:
         model_name: HuggingFace model identifier.
         allow_network: If True, allows network calls for model download/update.
-            Only set to True during `engram init` or `engram update-model`.
+            Only set to True during `myelin8 init` or `myelin8 update-model`.
             All normal operations (run, search, recall, context) pass False.
     """
     if not _check_sentence_transformers():
@@ -112,7 +112,7 @@ def _get_model(model_name: str = DEFAULT_MODEL, allow_network: bool = False):
             logger.info("Network mode: allowing model download/update check")
         else:
             # Normal operation: fully offline — zero network calls
-            # Model must already be cached from `engram init`
+            # Model must already be cached from `myelin8 init`
             os.environ["HF_HUB_OFFLINE"] = "1"
             os.environ["TRANSFORMERS_OFFLINE"] = "1"
             os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -153,7 +153,7 @@ class SearchResult:
 def download_model(model_name: str = DEFAULT_MODEL) -> bool:
     """Download or update the embedding model (network allowed).
 
-    Call this from `engram init` or `engram update-model`.
+    Call this from `myelin8 init` or `myelin8 update-model`.
     Normal operations use _get_model() which is fully offline.
 
     Returns True if model is ready, False if sentence-transformers not installed.
@@ -238,7 +238,7 @@ class EmbeddingIndex:
     """Tiered embedding index with Matryoshka-style dimensionality.
 
     Stores embeddings at four fidelity levels (hot/warm/cold/frozen),
-    persisted as .npy files under ~/.engram/index/.
+    persisted as .npy files under ~/.myelin8/index/.
 
     Search cascades across all populated tiers, weighted by fidelity:
     hot results are trusted more than frozen approximations.
@@ -247,7 +247,7 @@ class EmbeddingIndex:
     def __init__(self, index_dir: Optional[Path] = None,
                  model_name: str = DEFAULT_MODEL):
         if index_dir is None:
-            index_dir = Path.home() / ".engram" / "index"
+            index_dir = Path.home() / ".myelin8" / "index"
         self.index_dir = Path(index_dir)
         self.model_name = model_name
 

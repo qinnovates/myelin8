@@ -29,9 +29,9 @@ from .metadata import MetadataStore, Tier, ArtifactMeta, compute_sha256
 from .compressor import decompress_file
 from .pipeline import CompressionPipeline
 
-# Paths that Engram must NEVER modify (compress, encrypt, or delete).
+# Paths that Myelin8 must NEVER modify (compress, encrypt, or delete).
 # These directories are managed by their respective AI assistants and
-# expect plaintext files at specific paths. Engram can index/search them
+# expect plaintext files at specific paths. Myelin8 can index/search them
 # but must not alter originals.
 PROTECTED_PATHS = [
     Path.home() / ".claude",
@@ -547,8 +547,8 @@ class TieringEngine:
         """Check if a path is inside a protected directory.
 
         Protected paths (e.g. ~/.claude/) are managed by their AI assistants
-        and must never be modified, compressed, or deleted by Engram.
-        Engram can index and search them, but not alter originals.
+        and must never be modified, compressed, or deleted by Myelin8.
+        Myelin8 can index and search them, but not alter originals.
         """
         resolved = path.resolve()
         for protected in PROTECTED_PATHS:
@@ -737,7 +737,7 @@ class TieringEngine:
 
         # Write raw content to temp for frozen pipeline input
         import tempfile
-        raw_fd, raw_str = tempfile.mkstemp(suffix=".jsonl", prefix="engram-")
+        raw_fd, raw_str = tempfile.mkstemp(suffix=".jsonl", prefix="myelin8-")
         os.chmod(raw_str, 0o600)  # SECURITY: restrict before writing plaintext
         raw_path = Path(raw_str)
         with open(raw_fd, "wb") as f:

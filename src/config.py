@@ -1,5 +1,5 @@
 """
-Configuration schema and defaults for engram.
+Configuration schema and defaults for myelin8.
 
 Tier model (inspired by Splunk SmartStore + Elasticsearch ILM):
   HOT    -> no compression, immediate access
@@ -116,7 +116,7 @@ class ScanTarget:
 
 @dataclass
 class EncryptionConfig:
-    """Optional PQKC encryption via engram-vault sidecar (ML-KEM-768 + AES-256-GCM).
+    """Optional PQKC encryption via myelin8-vault sidecar (ML-KEM-768 + AES-256-GCM).
 
     Two modes:
       SIMPLE (default): Single recipient key for all tiers.
@@ -210,13 +210,13 @@ class EngineConfig:
     tier_policy: TierPolicy = field(default_factory=TierPolicy)
     encryption: EncryptionConfig = field(default_factory=EncryptionConfig)
     # Where to store tier metadata (access times, tier state)
-    metadata_dir: str = "~/.engram"
+    metadata_dir: str = "~/.myelin8"
     # Dry run mode — report what would happen without changing files
     dry_run: bool = False
     # Verbose output
     verbose: bool = False
-    # Audit logging — disabled by default. Engram is a compression tool first.
-    # When enabled, logs tier/encrypt/decrypt/recall events to ~/.engram/audit.log
+    # Audit logging — disabled by default. Myelin8 is a compression tool first.
+    # When enabled, logs tier/encrypt/decrypt/recall events to ~/.myelin8/audit.log
     # with minimal metadata (timestamp, operation, tier, short hash).
     # No paths, content, or queries. Log file is 0600 permissions.
     audit_log: bool = False
@@ -247,9 +247,9 @@ class EngineConfig:
         """Default scan targets for user project artifacts.
 
         NOTE: ~/.claude/ is intentionally excluded. Claude Code manages its
-        own session files and expects plaintext at specific paths. Engram
+        own session files and expects plaintext at specific paths. Myelin8
         should index user-controlled project files, not Claude's internals.
-        Use 'engram init' to add custom scan targets for your projects.
+        Use 'myelin8 init' to add custom scan targets for your projects.
         """
         return []
 
@@ -321,7 +321,7 @@ class EngineConfig:
             scan_targets=targets,
             tier_policy=policy,
             encryption=encryption,
-            metadata_dir=data.get("metadata_dir", "~/.engram"),
+            metadata_dir=data.get("metadata_dir", "~/.myelin8"),
             dry_run=data.get("dry_run", False),
             verbose=data.get("verbose", False),
             audit_log=data.get("audit_log", False),

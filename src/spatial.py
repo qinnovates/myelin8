@@ -1,5 +1,5 @@
 """
-Spatial memory extension for Engram — stores and indexes spatial artifacts
+Spatial memory extension for Myelin8 — stores and indexes spatial artifacts
 from Spot (LiDAR navigation app) and other spatial data sources.
 
 Artifact types:
@@ -14,7 +14,7 @@ Each artifact gets:
   - Merkle tree leaf (selective disclosure)
   - Keywords for semantic search
   - Tier placement (hot → warm → cold → frozen)
-  - Optional encryption via Engram's existing PQ envelope
+  - Optional encryption via Myelin8's existing PQ envelope
 
 Spatial search:
   - By keyword: "stairs near oak street"
@@ -116,8 +116,8 @@ class SpatialMemory:
     """
     Manages spatial artifacts with Merkle tree integrity and tiered storage.
 
-    This is the bridge between Spot (Swift, on-device) and Engram (Python, compression).
-    Spot exports spatial data as JSON → Engram ingests, indexes, compresses, and
+    This is the bridge between Spot (Swift, on-device) and Myelin8 (Python, compression).
+    Spot exports spatial data as JSON → Myelin8 ingests, indexes, compresses, and
     builds the Merkle tree for integrity verification and selective peer sharing.
     """
 

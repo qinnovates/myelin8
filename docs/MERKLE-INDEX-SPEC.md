@@ -33,14 +33,14 @@ The improvement doesn't come from Merkle math. It comes from eliminating 8MB of 
 
 ```
 BEFORE (v1):
-  Every engram call:
+  Every myelin8 call:
     Python starts → parse 5.3MB JSON → parse 3MB JSON → search → done
     (40ms tax on every invocation, even for a simple search)
 
 AFTER (Merkle-index):
   Sidecar starts once (session lifetime):
     Load tree + index into memory → ready
-  Every engram call:
+  Every myelin8 call:
     Python → sidecar IPC (0.15ms round-trip) → lookup + proof → return
     (0.2ms total, including IPC overhead)
 ```
@@ -116,12 +116,12 @@ Acceptable for a long-running sidecar process. The current JSON files are alread
 
 ```
 BEFORE:
-  Claude hook calls: python3 -m engram search "auth"
+  Claude hook calls: python3 -m myelin8 search "auth"
     → Python boots, parses 8MB JSON, searches, exits
     → 40ms + Python startup (~200ms cold, ~50ms warm)
 
 AFTER:
-  Claude hook calls: python3 -m engram search "auth"
+  Claude hook calls: python3 -m myelin8 search "auth"
     → Python sends "INDEX_SEARCH auth" to running sidecar
     → Sidecar returns results + proofs in 0.2ms
     → Python formats and returns
@@ -162,6 +162,6 @@ One data structure. Three functions. All in the Rust trust boundary.
 5. [ ] New protocol: `INDEX_SEARCH` — keyword lookup → return matching payloads + proofs
 6. [ ] New protocol: `INDEX_LOOKUP` — hash lookup → return payload + proof
 7. [ ] Update `vault.py` VaultClient with `index_search()`, `index_lookup()` methods
-8. [ ] Update `cli.py` — `engram search` routes through sidecar when available
+8. [ ] Update `cli.py` — `myelin8 search` routes through sidecar when available
 9. [ ] SessionStart hook: call `INDEX_LOAD` once to warm the sidecar
 10. [ ] Benchmark: before/after latency for search across 4,560 artifacts

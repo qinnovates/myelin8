@@ -1,12 +1,12 @@
 # Key Storage Guide
 
-How Engram manages encryption keys across platforms.
+How Myelin8 manages encryption keys across platforms.
 
 ---
 
-## How keys work in Engram
+## How keys work in Myelin8
 
-Engram uses ML-KEM-768 (NIST FIPS 203) + X25519 hybrid key encapsulation with AES-256-GCM data encryption. All private key operations happen inside a compiled Rust sidecar (`engram-vault`). Private keys never enter Python, never touch disk as files, and never appear in terminal output or process arguments.
+Myelin8 uses ML-KEM-768 (NIST FIPS 203) + X25519 hybrid key encapsulation with AES-256-GCM data encryption. All private key operations happen inside a compiled Rust sidecar (`myelin8-vault`). Private keys never enter Python, never touch disk as files, and never appear in terminal output or process arguments.
 
 The sidecar retrieves keys from your configured source, holds them in mlocked memory, performs in-process crypto, and zeros them immediately after.
 
@@ -16,14 +16,14 @@ The sidecar retrieves keys from your configured source, holds them in mlocked me
 
 ```bash
 # Generate per-tier ML-KEM-768 keypairs, store directly in macOS Keychain
-engram encrypt-setup
+myelin8 encrypt-setup
 ```
 
 Or via the sidecar directly:
 ```bash
-echo "KEYGEN warm" | engram-vault
-echo "KEYGEN cold" | engram-vault
-echo "KEYGEN frozen" | engram-vault
+echo "KEYGEN warm" | myelin8-vault
+echo "KEYGEN cold" | myelin8-vault
+echo "KEYGEN frozen" | myelin8-vault
 ```
 
 Private keys go straight into the OS credential vault. They never exist as files.
@@ -32,23 +32,23 @@ Private keys go straight into the OS credential vault. They never exist as files
 
 ## Supported key sources
 
-Configure in `~/.engram/config.json`:
+Configure in `~/.myelin8/config.json`:
 
 ### macOS Keychain
 ```json
-"warm_private_source": "keychain:engram:warm-key"
+"warm_private_source": "keychain:myelin8:warm-key"
 ```
 Sidecar reads from Keychain via Security.framework. Protected by login password.
 
 ### External command (Vault, KMS, custom)
 ```json
-"warm_private_source": "command:vault kv get -field=key secret/engram/warm"
+"warm_private_source": "command:vault kv get -field=key secret/myelin8/warm"
 ```
 Sidecar calls the command, captures key from stdout, uses it, zeros it. The command must output only the key. Only allowlisted executables permitted (vault, op, aws, gcloud, az, security, gpg, sops, pass).
 
 ### Environment variable (CI/CD only)
 ```json
-"warm_private_source": "env:ENGRAM_WARM_KEY"
+"warm_private_source": "env:MYELIN8_WARM_KEY"
 ```
 For ephemeral CI/CD runners only. Not for persistent machines.
 
@@ -63,9 +63,9 @@ Each tier gets its own independent ML-KEM-768 keypair:
 
 | Tier | Keychain entry | Purpose |
 |------|---------------|---------|
-| warm | `engram:warm-key` | Recent sessions (1-4 weeks old) |
-| cold | `engram:cold-key` | Older sessions (1-3 months) |
-| frozen | `engram:frozen-key` | Archival (3+ months) |
+| warm | `myelin8:warm-key` | Recent sessions (1-4 weeks old) |
+| cold | `myelin8:cold-key` | Older sessions (1-3 months) |
+| frozen | `myelin8:frozen-key` | Archival (3+ months) |
 
 Compromising one tier's key does not expose the others. Key rotation re-wraps DEK headers in O(metadata), not O(data).
 

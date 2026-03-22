@@ -219,13 +219,13 @@ class LSHIndex:
         and hashes.
 
         Args:
-            path: File path. Defaults to ~/.engram/index/lsh-tables.npz.
+            path: File path. Defaults to ~/.myelin8/index/lsh-tables.npz.
 
         Returns:
             Path where the index was saved.
         """
         if path is None:
-            path = os.path.join(os.path.expanduser("~"), ".engram", "index", "lsh-tables.npz")
+            path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "lsh-tables.npz")
 
         save_path = Path(path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -262,13 +262,13 @@ class LSHIndex:
         """Load an LSH index from disk.
 
         Args:
-            path: File path. Defaults to ~/.engram/index/lsh-tables.npz.
+            path: File path. Defaults to ~/.myelin8/index/lsh-tables.npz.
 
         Returns:
             Populated LSHIndex instance.
         """
         if path is None:
-            path = os.path.join(os.path.expanduser("~"), ".engram", "index", "lsh-tables.npz")
+            path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "lsh-tables.npz")
 
         data = np.load(path, allow_pickle=False)  # SECURITY: never allow pickle (CWE-502)
         config = data["config"]
@@ -469,7 +469,7 @@ class PQCodebook:
         """Persist codebook centroids to disk.
 
         Args:
-            path: File path. Defaults to ~/.engram/index/pq-codebook.npz.
+            path: File path. Defaults to ~/.myelin8/index/pq-codebook.npz.
 
         Returns:
             Path where the codebook was saved.
@@ -478,7 +478,7 @@ class PQCodebook:
             raise RuntimeError("Codebook not trained. Call train() first.")
 
         if path is None:
-            path = os.path.join(os.path.expanduser("~"), ".engram", "index", "pq-codebook.npz")
+            path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "pq-codebook.npz")
 
         save_path = Path(path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -495,13 +495,13 @@ class PQCodebook:
         """Load a trained codebook from disk.
 
         Args:
-            path: File path. Defaults to ~/.engram/index/pq-codebook.npz.
+            path: File path. Defaults to ~/.myelin8/index/pq-codebook.npz.
 
         Returns:
             Trained PQCodebook instance.
         """
         if path is None:
-            path = os.path.join(os.path.expanduser("~"), ".engram", "index", "pq-codebook.npz")
+            path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "pq-codebook.npz")
 
         data = np.load(path, allow_pickle=False)  # SECURITY: CWE-502
         config = data["config"]

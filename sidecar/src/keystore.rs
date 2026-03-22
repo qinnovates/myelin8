@@ -11,7 +11,7 @@
 //!   - Keys zeroed after use (handled by caller via Zeroizing<T>)
 //!
 //! File-based storage (Linux, other Unix):
-//!   - Keys stored in ~/.engram/keys/<tier>-key (hex-encoded)
+//!   - Keys stored in ~/.myelin8/keys/<tier>-key (hex-encoded)
 //!   - Protected by filesystem permissions: 0600 files, 0700 directory
 //!   - Permission verified on every read (rejects world/group-readable files)
 //!   - Atomic writes (temp file + rename, restricted mode from creation)
@@ -21,7 +21,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SERVICE: &str = "engram";
+const SERVICE: &str = "myelin8";
 const VALID_TIERS: &[&str] = &["warm", "cold", "frozen", "hot", "test", "index"];
 
 fn validate_tier(tier: &str) -> Result<(), String> {
@@ -116,7 +116,7 @@ mod linux {
         if !home_path.exists() {
             return Err(format!("HOME directory does not exist: {}", home));
         }
-        Ok(home_path.join(".engram").join("keys"))
+        Ok(home_path.join(".myelin8").join("keys"))
     }
 
     fn ensure_keys_dir() -> Result<PathBuf, String> {
@@ -233,7 +233,7 @@ mod file_fallback {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| "Neither HOME nor USERPROFILE set. Cannot determine key directory.".to_string())?;
-        Ok(PathBuf::from(home).join(".engram").join("keys"))
+        Ok(PathBuf::from(home).join(".myelin8").join("keys"))
     }
 
     fn ensure_keys_dir() -> Result<PathBuf, String> {

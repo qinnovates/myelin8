@@ -131,10 +131,10 @@ class TestActivationGraphWithMock:
 
 
 def _find_vault_binary() -> str | None:
-    """Find the engram-vault binary for integration tests."""
+    """Find the myelin8-vault binary for integration tests."""
     candidates = [
-        Path(__file__).parent.parent / "sidecar" / "target" / "release" / "engram-vault",
-        Path(__file__).parent.parent / "sidecar" / "target" / "debug" / "engram-vault",
+        Path(__file__).parent.parent / "sidecar" / "target" / "release" / "myelin8-vault",
+        Path(__file__).parent.parent / "sidecar" / "target" / "debug" / "myelin8-vault",
     ]
     for p in candidates:
         if p.exists():
@@ -147,7 +147,7 @@ def sidecar():
     """Start a real sidecar process for integration testing."""
     binary = _find_vault_binary()
     if not binary:
-        pytest.skip("engram-vault binary not found — run `cargo build --release`")
+        pytest.skip("myelin8-vault binary not found — run `cargo build --release`")
 
     proc = subprocess.Popen(
         [binary],

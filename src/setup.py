@@ -1,5 +1,5 @@
 """
-Interactive and guided setup for Engram.
+Interactive and guided setup for Myelin8.
 
 Two modes:
   GUIDED:      Auto-detects installed AI assistants, shows what was found,
@@ -13,7 +13,7 @@ Both modes:
   3. Let user confirm or pick
   4. Configure tier thresholds (or accept defaults)
   5. Optionally set up encryption
-  6. Write config to ~/.engram/config.json
+  6. Write config to ~/.myelin8/config.json
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
     """
     print()
     print("=" * 60)
-    print("  Engram — Guided Setup")
+    print("  Myelin8 — Guided Setup")
     print("  Brain-inspired AI memory compression")
     print("=" * 60)
     print()
@@ -203,7 +203,7 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
     # Step 5: Encryption
     print()
     encryption_enabled = _input_yn(
-        "Enable post-quantum encryption (ML-KEM-768)? Requires the engram-vault sidecar",
+        "Enable post-quantum encryption (ML-KEM-768)? Requires the myelin8-vault sidecar",
         default=False,
     )
 
@@ -211,7 +211,7 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
     use_envelope = False
     if encryption_enabled:
         print()
-        print("  Encryption enabled. Run `engram encrypt-setup` after init")
+        print("  Encryption enabled. Run `myelin8 encrypt-setup` after init")
         print("  to generate keypairs and store in Keychain.")
         print()
         print("  By default, only warm/cold/frozen tiers are encrypted.")
@@ -243,7 +243,7 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
         use_envelope = envelope_choice == "envelope"
         if use_envelope:
             print("    Envelope mode: each tier gets its own keypair.")
-            print("    Run `engram encrypt-setup` to generate per-tier keys.")
+            print("    Run `myelin8 encrypt-setup` to generate per-tier keys.")
 
     # Step 6: Save
     from .config import EncryptionConfig
@@ -287,14 +287,14 @@ def run_guided_setup(config_path: Path) -> EngineConfig:
             print("  No transitions needed.")
 
     print()
-    # Step 8: Register with AI assistants so they know Engram exists
+    # Step 8: Register with AI assistants so they know Myelin8 exists
     _register_with_ai_assistants()
 
     print("Next steps:")
     if not run_initial_tier:
-        print(f"  engram run --dry-run   # Preview tier transitions")
-        print(f"  engram run             # Execute tiering")
-    print(f"  engram status          # Check tier distribution")
+        print(f"  myelin8 run --dry-run   # Preview tier transitions")
+        print(f"  myelin8 run             # Execute tiering")
+    print(f"  myelin8 status          # Check tier distribution")
 
     return config
 
@@ -308,7 +308,7 @@ def run_interactive_setup(config_path: Path) -> EngineConfig:
     """
     print()
     print("=" * 60)
-    print("  Engram — Interactive Setup")
+    print("  Myelin8 — Interactive Setup")
     print("  Pick which AI memory locations to archive")
     print("=" * 60)
     print()
@@ -366,8 +366,8 @@ def run_interactive_setup(config_path: Path) -> EngineConfig:
     _register_with_ai_assistants()
 
     print(f"\nConfig saved: {config_path}")
-    print(f"  engram run --dry-run   # Preview")
-    print(f"  engram run             # Execute")
+    print(f"  myelin8 run --dry-run   # Preview")
+    print(f"  myelin8 run             # Execute")
 
     return config
 
@@ -445,26 +445,26 @@ def _configure_thresholds() -> TierPolicy:
 
 def _register_with_ai_assistants() -> None:
     """
-    Register Engram with AI assistants so they know it exists in future sessions.
+    Register Myelin8 with AI assistants so they know it exists in future sessions.
 
-    This is the fix for: "What's Engram?" — if the AI doesn't know Engram exists,
-    it can't use it. This step wires Engram into the AI's awareness.
+    This is the fix for: "What's Myelin8?" — if the AI doesn't know Myelin8 exists,
+    it can't use it. This step wires Myelin8 into the AI's awareness.
 
     Actions:
-      1. Install the Engram skill globally for Claude Code (~/.claude/skills/engram/)
-      2. Add Engram to Claude Code's global CLAUDE.md (loaded every session)
+      1. Install the Myelin8 skill globally for Claude Code (~/.claude/skills/myelin8/)
+      2. Add Myelin8 to Claude Code's global CLAUDE.md (loaded every session)
       3. Future: register with OpenClaw, Cursor, etc.
     """
     import shutil
 
     print()
-    print("Registering Engram with AI assistants...")
+    print("Registering Myelin8 with AI assistants...")
 
     registered = 0
 
     # ── Claude Code: install skill globally ──
-    claude_skills_dir = Path.home() / ".claude" / "skills" / "engram"
-    skill_source = Path(__file__).parent.parent / "skills" / "engram" / "SKILL.md"
+    claude_skills_dir = Path.home() / ".claude" / "skills" / "myelin8"
+    skill_source = Path(__file__).parent.parent / "skills" / "myelin8" / "SKILL.md"
 
     if skill_source.exists():
         claude_skills_dir.mkdir(parents=True, exist_ok=True)
@@ -482,24 +482,24 @@ def _register_with_ai_assistants() -> None:
 
     # ── Claude Code: add to global CLAUDE.md ──
     claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
-    engram_marker = "## Engram"
+    myelin8_marker = "## Myelin8"
 
     if claude_md_path.exists():
         existing = claude_md_path.read_text()
-        if engram_marker not in existing:
-            # Append Engram section
+        if myelin8_marker not in existing:
+            # Append Myelin8 section
             with open(claude_md_path, "a") as f:
-                f.write(_engram_claude_md_section())
+                f.write(_myelin8_claude_md_section())
             print(f"  Claude Code global context updated: {claude_md_path}")
             registered += 1
         else:
-            print(f"  Claude Code global context already has Engram")
+            print(f"  Claude Code global context already has Myelin8")
             registered += 1
     else:
         # Create new global CLAUDE.md
         claude_md_path.parent.mkdir(parents=True, exist_ok=True)
         with open(claude_md_path, "w") as f:
-            f.write(f"# Global Context\n\n{_engram_claude_md_section()}")
+            f.write(f"# Global Context\n\n{_myelin8_claude_md_section()}")
         print(f"  Claude Code global context created: {claude_md_path}")
         registered += 1
 
@@ -509,12 +509,12 @@ def _register_with_ai_assistants() -> None:
         memory_file = openclaw_dir / "MEMORY.md"
         if memory_file.exists():
             existing = memory_file.read_text()
-            if "engram" not in existing.lower():
+            if "myelin8" not in existing.lower():
                 with open(memory_file, "a") as f:
-                    f.write("\n\n## Engram\nInstalled: `pip install bci-engram`. "
+                    f.write("\n\n## Myelin8\nInstalled: `pip install myelin8`. "
                             "Tiered memory compression with PQC encryption. "
-                            "Run `engram search` to find old sessions, "
-                            "`engram status` to check tier distribution.\n")
+                            "Run `myelin8 search` to find old sessions, "
+                            "`myelin8 status` to check tier distribution.\n")
                 print(f"  OpenClaw memory updated: {memory_file}")
                 registered += 1
         else:
@@ -526,21 +526,21 @@ def _register_with_ai_assistants() -> None:
         print("  No AI assistants found to register with")
 
 
-def _engram_claude_md_section() -> str:
-    """Generate the Engram section for Claude Code's global CLAUDE.md."""
+def _myelin8_claude_md_section() -> str:
+    """Generate the Myelin8 section for Claude Code's global CLAUDE.md."""
     return """
-## Engram
+## Myelin8
 
-Engram is installed on this system. Brain-modeled tiered AI memory with PQC encryption.
+Myelin8 is installed on this system. Brain-modeled tiered AI memory with PQC encryption.
 
 | Command | What |
 |---------|------|
-| `engram search <query>` | Search all tiers without decompressing |
-| `engram status` | Show tier distribution and compression stats |
-| `engram recall <path>` | Decompress a cold/frozen artifact back to hot |
-| `engram verify` | Check integrity of all tracked artifacts |
-| `engram context --query <q>` | Get token-budget-optimized memory block |
-| `engram run` | Execute tier transitions (compress old sessions) |
+| `myelin8 search <query>` | Search all tiers without decompressing |
+| `myelin8 status` | Show tier distribution and compression stats |
+| `myelin8 recall <path>` | Decompress a cold/frozen artifact back to hot |
+| `myelin8 verify` | Check integrity of all tracked artifacts |
+| `myelin8 context --query <q>` | Get token-budget-optimized memory block |
+| `myelin8 run` | Execute tier transitions (compress old sessions) |
 
-Repo: `qinnovates/engram`. Local: check `~/.engram/` for config and data.
+Repo: `qinnovates/myelin8`. Local: check `~/.myelin8/` for config and data.
 """

@@ -13,7 +13,7 @@
 use security_framework::passwords::{delete_generic_password, get_generic_password, set_generic_password};
 use std::str;
 
-const SERVICE: &str = "engram";
+const SERVICE: &str = "myelin8";
 
 /// Allowed tier values (defense-in-depth, also validated in main.rs)
 const VALID_TIERS: &[&str] = &["warm", "cold", "frozen", "hot", "test", "index"];

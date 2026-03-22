@@ -1,9 +1,9 @@
 """
-Python client for engram-vault (Rust sidecar).
+Python client for myelin8-vault (Rust sidecar).
 
 This module is the ONLY interface between Python and key operations.
 Python NEVER sees private key material. All crypto is delegated to
-the compiled engram-vault binary which uses mlock + zeroize.
+the compiled myelin8-vault binary which uses mlock + zeroize.
 
 Protocol: stdin/stdout, one command per line.
   ENCRYPT <input> <output> <tier> → OK | ERROR <msg>
@@ -25,14 +25,14 @@ from .encryption import EncryptionError
 
 
 # Path to the compiled sidecar binary
-_VAULT_BINARY_NAME = "engram-vault"
+_VAULT_BINARY_NAME = "myelin8-vault"
 
 # Allowed tier values — rejects anything else before it hits the protocol
 _VALID_TIERS = frozenset({"hot", "warm", "cold", "frozen", "index"})
 
 
 def _find_vault_binary() -> str:
-    """Find and verify the engram-vault binary."""
+    """Find and verify the myelin8-vault binary."""
     candidates = []
 
     # Check PATH first
@@ -66,7 +66,7 @@ def _find_vault_binary() -> str:
 
 
 class VaultClient:
-    """Client for the engram-vault sidecar process.
+    """Client for the myelin8-vault sidecar process.
 
     Manages a long-lived subprocess. The sidecar stays running for the
     duration of the engine's lifecycle, accepting commands via stdin.
@@ -93,7 +93,7 @@ class VaultClient:
         response = self._send("PING")
         if response != "PONG":
             raise EncryptionError(
-                f"engram-vault health check failed: {response}"
+                f"myelin8-vault health check failed: {response}"
             )
 
         return self._proc
@@ -112,7 +112,7 @@ class VaultClient:
             return response
         except (BrokenPipeError, OSError):
             self._proc = None
-            raise EncryptionError("engram-vault process died unexpectedly")
+            raise EncryptionError("myelin8-vault process died unexpectedly")
 
     @staticmethod
     def _validate_input(value: str, name: str) -> None:

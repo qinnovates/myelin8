@@ -1,4 +1,4 @@
-//! engram-vault v2: Secure crypto sidecar + Merkle-Index
+//! myelin8-vault v2: Secure crypto sidecar + Merkle-Index
 //!
 //! ALL encryption AND integrity verification happens inside this binary.
 //! Python is a thin CLI wrapper. No JSON parsing for search — sidecar holds the index.
@@ -165,7 +165,7 @@ fn main() {
 
         let response = match cmd.as_str() {
             "PING" => "PONG".to_string(),
-            "VERSION" => "OK engram-vault 2.1.0".to_string(),
+            "VERSION" => "OK myelin8-vault 2.1.0".to_string(),
             "QUIT" => {
                 let _ = writeln!(stdout, "BYE");
                 break;

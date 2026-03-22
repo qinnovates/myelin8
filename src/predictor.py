@@ -87,7 +87,7 @@ class ContextPredictor:
     """
     Predicts which sessions will be relevant based on conversation context.
 
-    Maintains a tiered embedding index that mirrors Engram's storage tiers.
+    Maintains a tiered embedding index that mirrors Myelin8's storage tiers.
     Each tier stores embeddings at its native Matryoshka dimension.
     Search cascades from cheapest (frozen, 64-dim) to most expensive (hot, 384-dim).
     """
@@ -138,7 +138,7 @@ class ContextPredictor:
 
     def register(self, session_hash: str, text: str, summary: str,
                  tier: str = "hot", path: str = "") -> None:
-        """Register a session with its embedding. Called during engram scan."""
+        """Register a session with its embedding. Called during myelin8 scan."""
         embedding = self.embed(text)
         if embedding is None:
             return

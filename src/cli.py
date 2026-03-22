@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-CLI for engram-engine.
+CLI for myelin8-engine.
 
 Usage:
-  engram run [--config PATH] [--dry-run] [--verbose]
-  engram status [--config PATH]
-  engram recall <file> [--config PATH]
-  engram init [--config PATH]
-  engram scan [--config PATH]
-  engram reindex [--config PATH]
-  engram verify [--config PATH]
-  engram encrypt-setup
+  myelin8 run [--config PATH] [--dry-run] [--verbose]
+  myelin8 status [--config PATH]
+  myelin8 recall <file> [--config PATH]
+  myelin8 init [--config PATH]
+  myelin8 scan [--config PATH]
+  myelin8 reindex [--config PATH]
+  myelin8 verify [--config PATH]
+  myelin8 encrypt-setup
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from .encryption import EncryptionError
 from .setup import run_guided_setup, run_interactive_setup
 
 
-DEFAULT_CONFIG = "~/.engram/config.json"
+DEFAULT_CONFIG = "~/.myelin8/config.json"
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -276,7 +276,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
             for issue in merkle_issues:
                 print(f"    {issue}")
     else:
-        print("Merkle Tree:    not initialized (run 'engram scan' to build)")
+        print("Merkle Tree:    not initialized (run 'myelin8 scan' to build)")
 
 
 def cmd_lock(args: argparse.Namespace) -> None:
@@ -288,7 +288,7 @@ def cmd_lock(args: argparse.Namespace) -> None:
     engine = TieringEngine(config)
     engine.lock_index()
     print("Index locked. All index files encrypted.")
-    print("Run `engram unlock` or any engram command to decrypt (Touch ID).")
+    print("Run `myelin8 unlock` or any myelin8 command to decrypt (Touch ID).")
 
 
 def cmd_unlock(args: argparse.Namespace) -> None:
@@ -314,7 +314,7 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
         from .vault import VaultClient
         client = VaultClient()
         client.close()
-        print("[OK] engram-vault sidecar found")
+        print("[OK] myelin8-vault sidecar found")
         print("[OK] NIST-approved: ML-KEM-768 + X25519 + AES-256-GCM")
     except EncryptionError as e:
         print(f"[MISSING] {e}")
@@ -344,7 +344,7 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
     print()
     print("Step 2: Update your config")
     print("-" * 40)
-    print('  In ~/.engram/config.json, set:')
+    print('  In ~/.myelin8/config.json, set:')
     print('  "encryption": {')
     print('    "enabled": true,')
     print('    "envelope_mode": true')
@@ -361,7 +361,7 @@ def cmd_encrypt_setup(_args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="engram",
+        prog="myelin8",
         description="AI-agnostic tiered memory compression with optional PQKC encryption",
     )
     parser.add_argument(

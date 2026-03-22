@@ -1,5 +1,5 @@
 """
-Encryption layer — delegates ALL crypto to the engram-vault Rust sidecar.
+Encryption layer — delegates ALL crypto to the myelin8-vault Rust sidecar.
 
 The sidecar uses NIST-approved algorithms only:
   ML-KEM-768 (FIPS 203) + X25519 hybrid key encapsulation
@@ -11,7 +11,7 @@ All crypto happens in the compiled Rust sidecar with mlock + zeroize.
 
 Security model:
   - Compress THEN encrypt (compress-then-encrypt is standard practice)
-  - Encryption uses engram-vault sidecar (must be built from sidecar/)
+  - Encryption uses myelin8-vault sidecar (must be built from sidecar/)
   - Private keys stored in OS credential vault (Keychain, DPAPI, libsecret)
   - Python only ever sees public keys (for config)
 """

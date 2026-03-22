@@ -30,8 +30,8 @@ const MAX_SUMMARY_BYTES: usize = 4_096;
 const MAX_KEYWORD_BYTES: usize = 128;
 
 // ── Seal key derivation context (Finding #2: derive internally, not from Python) ──
-const SEAL_HKDF_INFO: &[u8] = b"engram-merkle-seal-v1";
-const MANIFEST_HKDF_INFO: &[u8] = b"engram-manifest-sign-v1";
+const SEAL_HKDF_INFO: &[u8] = b"myelin8-merkle-seal-v1";
+const MANIFEST_HKDF_INFO: &[u8] = b"myelin8-manifest-sign-v1";
 
 fn hash_leaf(data: &[u8]) -> [u8; 32] {
     let mut hasher = Sha3_256::new();

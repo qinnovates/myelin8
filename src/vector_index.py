@@ -49,7 +49,7 @@ HNSW_EF_CONSTRUCTION = 200
 HNSW_EF_SEARCH = 50
 
 # Default index directory
-DEFAULT_INDEX_DIR = Path("~/.engram/index")
+DEFAULT_INDEX_DIR = Path("~/.myelin8/index")
 
 # Try to import hnswlib; fall back gracefully
 try:
@@ -313,7 +313,7 @@ class HNSWIndex:
 
         Args:
             index_dir: Directory to save index files. Defaults to
-                       ~/.engram/index/.
+                       ~/.myelin8/index/.
         """
         if index_dir is None:
             index_dir = Path(DEFAULT_INDEX_DIR).expanduser()
@@ -331,7 +331,7 @@ class HNSWIndex:
 
         Args:
             index_dir: Directory containing index files. Defaults to
-                       ~/.engram/index/.
+                       ~/.myelin8/index/.
         """
         if index_dir is None:
             index_dir = Path(DEFAULT_INDEX_DIR).expanduser()

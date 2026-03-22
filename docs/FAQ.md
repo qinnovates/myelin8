@@ -1,9 +1,9 @@
-# Engram FAQ
+# Myelin8 FAQ
 
 ## Table of Contents
 
 - [General](#general)
-  - [What is Engram?](#what-is-engram)
+  - [What is Myelin8?](#what-is-myelin8)
   - [Why not just use a bigger context window?](#why-not-just-use-a-bigger-context-window)
   - [How does it compare to just saving chat logs?](#how-does-it-compare-to-just-saving-chat-logs)
   - [What is context drift?](#what-is-context-drift)
@@ -27,13 +27,13 @@
   - [What commands does it support?](#what-commands-does-it-support)
   - [How big is the binary?](#how-big-is-the-binary)
 - [Encryption](#encryption)
-  - [What algorithms does Engram use?](#what-algorithms-does-engram-use)
+  - [What algorithms does Myelin8 use?](#what-algorithms-does-myelin8-use)
   - [What is ML-KEM-768?](#what-is-ml-kem-768)
   - [Why post-quantum?](#why-post-quantum-nobody-has-a-quantum-computer)
   - [Are summaries encrypted?](#are-summaries-encrypted)
   - [Where are encryption keys stored?](#where-are-encryption-keys-stored)
 - [Components](#components)
-  - [How is Engram structured?](#how-is-engram-structured)
+  - [How is Myelin8 structured?](#how-is-myelin8-structured)
   - [What does Python do vs Rust?](#what-does-python-do-vs-what-does-rust-do)
 - [Performance](#performance)
   - [Measured benchmarks](#measured-benchmarks-4560-real-artifacts)
@@ -45,7 +45,7 @@
 
 ## General
 
-### What is Engram?
+### What is Myelin8?
 A tiered memory compression engine for AI assistants. It extends AI context windows by compressing, indexing, and encrypting old sessions — modeled on how the brain stores memory through progressive compression.
 
 ### Why not just use a bigger context window?
@@ -56,16 +56,16 @@ Context windows will grow to 10M tokens. That makes capacity less scarce, but it
 - **Privacy.** More data per prompt = more sensitive data exposed. Tier-gated encryption limits what enters the context.
 
 ### How does it compare to just saving chat logs?
-Raw logs grow forever and have no search, no compression, no integrity verification, and no encryption. Engram gives you 11x compression, keyword + semantic search, SHA3-256 Merkle integrity proofs on every result, and optional post-quantum encryption — all while keeping everything searchable without decompression.
+Raw logs grow forever and have no search, no compression, no integrity verification, and no encryption. Myelin8 gives you 11x compression, keyword + semantic search, SHA3-256 Merkle integrity proofs on every result, and optional post-quantum encryption — all while keeping everything searchable without decompression.
 
 ---
 
 ### What is context drift?
 The compounding approximation error when an LLM references compressed or summarized memory instead of original content. Each recall through a lossy representation introduces a small error. Over many references, these errors compound — the model builds confidently on a foundation that has drifted from the original.
 
-Engram mitigates context drift two ways:
+Myelin8 mitigates context drift two ways:
 1. **Merkle integrity** — proves the recalled artifact is bit-for-bit identical to what was stored. The drift may happen in the summary, but the original is always recoverable and provably intact.
-2. **Tiered recall** — summaries serve 80% of queries (fast, approximate). When precision matters, `engram recall` decompresses the original content. The original is the anchor that prevents drift from compounding indefinitely.
+2. **Tiered recall** — summaries serve 80% of queries (fast, approximate). When precision matters, `myelin8 recall` decompresses the original content. The original is the anchor that prevents drift from compounding indefinitely.
 
 ---
 
@@ -83,7 +83,7 @@ Engram mitigates context drift two ways:
 Each tier trades retrieval speed for storage efficiency. Artifacts move down automatically based on age and access patterns. Recalled artifacts promote back to hot.
 
 ### What triggers a tier transition?
-Age and idle time. Default thresholds: hot → warm at 48 hours idle, warm → cold at 7 days, cold → frozen at 90 days. All configurable in `~/.engram/config.json`.
+Age and idle time. Default thresholds: hot → warm at 48 hours idle, warm → cold at 7 days, cold → frozen at 90 days. All configurable in `~/.myelin8/config.json`.
 
 ### Can I prevent an artifact from moving to a lower tier?
 Frequently accessed artifacts resist demotion — accessing an artifact resets its idle timer. If you recall a cold artifact, it promotes back to hot.
@@ -106,13 +106,13 @@ Session 1  Session 2  Session 3  Session 4
 ```
 
 ### How does it prevent hallucination?
-When the AI claims "we discussed X in Session 3," Engram produces a Merkle proof — the path of hashes from Session 3's leaf to the root. If the proof verifies, the session is real. If not, the AI is making it up. Cryptographic proof, not trust.
+When the AI claims "we discussed X in Session 3," Myelin8 produces a Merkle proof — the path of hashes from Session 3's leaf to the root. If the proof verifies, the session is real. If not, the AI is making it up. Cryptographic proof, not trust.
 
 ### What is a Merkle proof?
 A log(n)-sized path from a leaf to the root. To prove Session 3 exists in a tree of 1,000 sessions, you need only ~10 hashes (the proof path), not all 1,000 session hashes. You prove the session is authentic without revealing any other sessions.
 
 ### Why SHA3-256 instead of SHA-256?
-Most Merkle trees (Bitcoin, Certificate Transparency) use SHA-256. Engram uses SHA3-256 for three reasons:
+Most Merkle trees (Bitcoin, Certificate Transparency) use SHA-256. Myelin8 uses SHA3-256 for three reasons:
 
 1. **Post-quantum collision resistance.** SHA-256's collision resistance drops to ~64-bit against quantum attacks (Brassard-Hoyer-Tapp). SHA3-256 maintains 128-bit. For Merkle proofs used in selective disclosure, collision resistance is the critical property.
 2. **Sponge construction.** SHA-256 uses Merkle-Damgard, which is vulnerable to length extension attacks. SHA3's sponge construction is immune by design.
@@ -190,7 +190,7 @@ stdin/stdout line protocol. Python starts the sidecar as a subprocess, sends com
 
 ## Encryption
 
-### What algorithms does Engram use?
+### What algorithms does Myelin8 use?
 
 | Purpose | Algorithm | Standard |
 |---------|-----------|----------|
@@ -202,10 +202,10 @@ stdin/stdout line protocol. Python starts the sidecar as a subprocess, sends com
 | Key storage | macOS Keychain | Apple Security.framework |
 
 ### What is ML-KEM-768?
-NIST's post-quantum key encapsulation mechanism (FIPS 203, finalized 2024). It protects encrypted data against future quantum computers that could break RSA and ECC. Engram uses a hybrid scheme: ML-KEM-768 (quantum-safe) + X25519 (classical). Both shared secrets are combined via HKDF to derive the AES key. Even if one scheme is broken, the other still protects the data.
+NIST's post-quantum key encapsulation mechanism (FIPS 203, finalized 2024). It protects encrypted data against future quantum computers that could break RSA and ECC. Myelin8 uses a hybrid scheme: ML-KEM-768 (quantum-safe) + X25519 (classical). Both shared secrets are combined via HKDF to derive the AES key. Even if one scheme is broken, the other still protects the data.
 
 ### Why post-quantum? Nobody has a quantum computer.
-Correct. But Engram stores data that may need to be secure for years. The "harvest now, decrypt later" threat: an adversary records your encrypted data today and decrypts it when quantum computers arrive. ML-KEM-768 eliminates this threat at zero performance cost (key encapsulation adds <1ms).
+Correct. But Myelin8 stores data that may need to be secure for years. The "harvest now, decrypt later" threat: an adversary records your encrypted data today and decrypts it when quantum computers arrive. ML-KEM-768 eliminates this threat at zero performance cost (key encapsulation adds <1ms).
 
 ### Are summaries encrypted?
 No. Summaries and keywords are stored unencrypted because they must be searchable. This is a deliberate tradeoff: summaries reveal what a session was ABOUT but not what was SAID. The full content stays encrypted on disk. The Merkle proof proves the summary matches the encrypted content without decrypting it.
@@ -219,10 +219,10 @@ macOS Keychain, accessed via Security.framework from the Rust sidecar. Keys are 
 
 ## Components
 
-### How is Engram structured?
+### How is Myelin8 structured?
 
 ```
-engram/
+myelin8/
 ├── src/                          # Python: orchestration, CLI, search
 │   ├── engine.py                 # Tiering engine (scan, compress, recall)
 │   ├── pipeline.py               # Compression pipeline (zstd, Parquet)

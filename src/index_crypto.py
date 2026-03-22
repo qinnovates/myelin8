@@ -1,5 +1,5 @@
 """
-Index encryption — encrypts/decrypts the entire ~/.engram/index/ bundle.
+Index encryption — encrypts/decrypts the entire ~/.myelin8/index/ bundle.
 
 The semantic index, embeddings, HNSW graphs, LSH tables, PQ codebook,
 and artifact registry all contain metadata about your sessions. Even
@@ -9,7 +9,7 @@ between artifacts.
 
 This module encrypts the index as a single tarball on lock, and
 decrypts it on unlock. The decrypted index exists in memory (via tmpfs
-or a temp dir with 0700 permissions) only while Engram is actively
+or a temp dir with 0700 permissions) only while Myelin8 is actively
 running.
 
 Flow:
@@ -17,7 +17,7 @@ Flow:
   During session: index files are plaintext in a 0700 temp dir
   Session end:    lock() → encrypt index bundle → delete plaintext
 
-Uses the Rust sidecar (engram-vault) for encryption/decryption so
+Uses the Rust sidecar (myelin8-vault) for encryption/decryption so
 private keys never enter Python.
 """
 
@@ -42,7 +42,7 @@ INDEX_FILES = [
     "hnsw-warm.bin",
     "hnsw-cold.bin",
     "hnsw-frozen.bin",
-    "lsh-tables.npz",
+    # "lsh-tables.npz" removed — LSH cut (redundant with HNSW)
     "pq-codebook.npz",
     "paths-hot.json",
     "paths-warm.json",
@@ -58,17 +58,17 @@ INDEX_TIER = "hot"  # Use the hot tier key for index encryption
 
 
 class IndexCrypto:
-    """Encrypts and decrypts the Engram index bundle.
+    """Encrypts and decrypts the Myelin8 index bundle.
 
     Registers an atexit handler on unlock to re-lock the index if the
     process exits without explicit lock(). This closes the plaintext
     exposure window (CWE-377) on crashes or unclean shutdowns.
     """
 
-    def __init__(self, engram_dir: Path):
-        self.engram_dir = engram_dir
-        self.bundle_path = engram_dir / INDEX_BUNDLE
-        self.encrypted_path = engram_dir / INDEX_BUNDLE_ENCRYPTED
+    def __init__(self, myelin8_dir: Path):
+        self.myelin8_dir = myelin8_dir
+        self.bundle_path = myelin8_dir / INDEX_BUNDLE
+        self.encrypted_path = myelin8_dir / INDEX_BUNDLE_ENCRYPTED
         self._vault = None
         self._atexit_registered = False
 
@@ -86,14 +86,14 @@ class IndexCrypto:
     def has_index_files(self) -> bool:
         """Check if plaintext index files exist."""
         for name in INDEX_FILES:
-            if (self.engram_dir / name).exists():
+            if (self.myelin8_dir / name).exists():
                 return True
         return False
 
     def lock(self) -> None:
         """Encrypt the index: bundle all index files → encrypt → delete plaintext.
 
-        Call this at session end or when Engram is not actively running.
+        Call this at session end or when Myelin8 is not actively running.
         After locking, the index is a single encrypted .encf file.
         """
         if not self.has_index_files():
@@ -102,7 +102,7 @@ class IndexCrypto:
         # Bundle all index files into a tarball
         existing_files = []
         for name in INDEX_FILES:
-            path = self.engram_dir / name
+            path = self.myelin8_dir / name
             if path.exists():
                 existing_files.append((path, name))
 
@@ -128,16 +128,16 @@ class IndexCrypto:
             path.unlink(missing_ok=True)
 
         # Clean up boilerplate store too (contains plaintext prompt fragments)
-        boilerplate_dir = self.engram_dir / "boilerplate"
+        boilerplate_dir = self.myelin8_dir / "boilerplate"
         if boilerplate_dir.exists():
             # Tar and encrypt boilerplate separately
-            bp_tar = self.engram_dir / "boilerplate.tar"
+            bp_tar = self.myelin8_dir / "boilerplate.tar"
             with tarfile.open(str(bp_tar), "w") as tar:
                 for f in boilerplate_dir.iterdir():
                     if f.is_file():
                         tar.add(str(f), arcname=f.name)
             os.chmod(str(bp_tar), 0o600)
-            bp_enc = self.engram_dir / "boilerplate.tar.encf"
+            bp_enc = self.myelin8_dir / "boilerplate.tar.encf"
             vault.encrypt(bp_tar, bp_enc, INDEX_TIER)
             bp_tar.unlink(missing_ok=True)
             shutil.rmtree(boilerplate_dir)
@@ -185,16 +185,16 @@ class IndexCrypto:
                             raise ValueError(f"Unsafe link in index bundle: {member.linkname}")
                 import sys
                 if sys.version_info >= (3, 12):
-                    tar.extractall(str(self.engram_dir), filter="data")
+                    tar.extractall(str(self.myelin8_dir), filter="data")
                 else:
-                    tar.extractall(str(self.engram_dir))
+                    tar.extractall(str(self.myelin8_dir))
         finally:
             # Always clean up plaintext bundle
             self.bundle_path.unlink(missing_ok=True)
 
         # Set permissions on extracted files
         for name in INDEX_FILES:
-            path = self.engram_dir / name
+            path = self.myelin8_dir / name
             if path.exists():
                 os.chmod(str(path), 0o600)
 
@@ -202,11 +202,11 @@ class IndexCrypto:
         self.bundle_path.unlink(missing_ok=True)
 
         # Restore boilerplate if encrypted
-        bp_enc = self.engram_dir / "boilerplate.tar.encf"
+        bp_enc = self.myelin8_dir / "boilerplate.tar.encf"
         if bp_enc.exists():
-            bp_tar = self.engram_dir / "boilerplate.tar"
+            bp_tar = self.myelin8_dir / "boilerplate.tar"
             vault.decrypt(bp_enc, bp_tar, INDEX_TIER)
-            boilerplate_dir = self.engram_dir / "boilerplate"
+            boilerplate_dir = self.myelin8_dir / "boilerplate"
             boilerplate_dir.mkdir(exist_ok=True)
             try:
                 with tarfile.open(str(bp_tar), "r") as tar:

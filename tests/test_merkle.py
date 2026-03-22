@@ -1,4 +1,4 @@
-"""Tests for Merkle tree via Rust sidecar (engram-vault)."""
+"""Tests for Merkle tree via Rust sidecar (myelin8-vault)."""
 
 import pytest
 
@@ -15,7 +15,7 @@ def vault():
         yield client
         client.close()
     except EncryptionError:
-        pytest.skip("engram-vault sidecar not available")
+        pytest.skip("myelin8-vault sidecar not available")
 
 
 class TestMerkleAdd:

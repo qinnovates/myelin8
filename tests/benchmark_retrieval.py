@@ -1,5 +1,5 @@
 """
-Engram Retrieval Benchmark — Rigorous evaluation of memory search quality.
+Myelin8 Retrieval Benchmark — Rigorous evaluation of memory search quality.
 
 Metrics:
   - Recall@k: what fraction of relevant sessions did we find in the top k results?
@@ -130,7 +130,7 @@ def build_ground_truth(sessions: list[dict]) -> list[QueryGroundTruth]:
         ),
         QueryGroundTruth(
             query="merkle tree integrity proof",
-            description="Sessions about Merkle tree implementation for Engram",
+            description="Sessions about Merkle tree implementation for Myelin8",
             relevant_session_hashes=find_relevant(["merkle"]),
         ),
         QueryGroundTruth(
@@ -204,7 +204,7 @@ def run_benchmark(sessions: list[dict], ground_truth: list[QueryGroundTruth]) ->
         v1_results.append(qr)
 
     # ═══ Method 2: v2 Keyword (Rust sidecar) ═══
-    vault = str(Path("sidecar/target/release/engram-vault").resolve())
+    vault = str(Path("sidecar/target/release/myelin8-vault").resolve())
     proc = subprocess.Popen([vault], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True)
 

@@ -1,820 +1,462 @@
-# Engram Architecture
+# Architecture
 
-Detailed documentation of how Engram works, what gets encrypted, how logging operates, and how each component is secured.
+A SIEM-inspired memory engine for AI assistants. Tiered compression, hybrid search, significance scoring, and integrity verification — designed to reduce token usage and compute cost while keeping years of AI memory searchable.
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [Design Philosophy](#design-philosophy)
+- [The SIEM Analogy](#the-siem-analogy)
 - [Data Flow](#data-flow)
 - [Registration and Indexing](#registration-and-indexing)
+- [Significance Scoring](#significance-scoring)
 - [Tier Transitions](#tier-transitions)
 - [Compression Pipeline](#compression-pipeline)
 - [Search and Retrieval](#search-and-retrieval)
-- [HNSW Vector Index](#hnsw-vector-index)
 - [Hybrid Search](#hybrid-search)
+- [Merkle Tree](#merkle-tree)
 - [Recall](#recall)
-- [Encryption](#encryption)
-- [What Gets Encrypted](#what-gets-encrypted)
-- [Index Encryption](#index-encryption)
-- [Rust Crypto Sidecar](#rust-crypto-sidecar)
-- [Key Management](#key-management)
-- [Audit Logging](#audit-logging)
-- [Lookup Tables](#lookup-tables)
 - [Embedding Architecture](#embedding-architecture)
-- [File Permissions](#file-permissions)
-- [Threat Model](#threat-model)
+- [CoGraph (Associative Recall)](#cograph-associative-recall)
+- [Encryption (Opt-In)](#encryption-opt-in)
+- [File Layout](#file-layout)
+- [Protected Paths](#protected-paths)
 
 ---
 
-## Overview
+## Design Philosophy
 
-Engram is a tiered memory compression engine that models how the brain stores information. It has four tiers (hot, warm, cold, frozen), a semantic index for search, and optional post-quantum encryption.
+Two principles drive every design decision:
 
-Every component is designed around two principles:
-1. **Don't recompute what you can store and look up.** Every retrieval path uses precomputed lookup tables.
-2. **Private keys never enter Python.** All crypto operations go through a compiled Rust sidecar.
+1. **Don't recompute what you can store and look up.** Why recompute what the full digits of pi is if you have the answer written on a chalkboard? Rather than recomputing pi from the actual formula, we just know 3.14, it's close enough, it's an estimate. Every retrieval path uses precomputed indexes, summaries, and keyword maps — never raw file scanning.
+
+2. **Search the index, not the data.** Large data warehouses like SIEMs use indexing, compression, and KV stores because when you're dealing with massive data, you can't grep through everything. The index tells you WHERE the answer is. You only open the actual data when you know it's there.
+
+---
+
+## The SIEM Analogy
+
+This engine is modeled after how Splunk, Elasticsearch, and Snowflake handle petabyte-scale log data — not after how RAG systems handle text chunks.
+
+| SIEM Component | What It Does | Myelin8 Equivalent |
+|---|---|---|
+| **Indexer** | Ingests raw logs, compresses, writes to time-partitioned buckets | `myelin8 add` + `myelin8 run` — user defines sources, engine indexes and compresses |
+| **Buckets** (hot/warm/cold/frozen) | Time-partitioned storage, decreasing access speed | Tiered memory: recent = full text, old = compressed, oldest = columnar |
+| **tsidx** (inverted index) | Knows which terms exist in which bucket WITHOUT reading raw data | Semantic index — keywords, summaries, hashes per artifact |
+| **Bloom filters** | Probabilistic check: "does this bucket contain term X?" Skip buckets that can't match | Merkle tree — existence check + partition routing without decompression |
+| **Search head** | Coordinates queries across indexers, merges results | Hybrid search — FTS + semantic + RRF fusion |
+| **Cluster master** | Manages tier locations, handles decompression transparently | Engine — the AI never sees compressed data, engine returns plaintext |
+| **SmartStore** | Remote cold/frozen storage, cache locally on access | Frozen Parquet tier, `recall` promotes back to hot |
+
+The key principle from SIEMs: **the search head never reads raw data.** It queries indexes. It checks filters. It only opens actual data when it knows the answer is there. This is the opposite of what RAG systems do (embed everything, search everything, hope cosine similarity finds it).
 
 ---
 
 ## Data Flow
 
 ```
-AI session files (Claude, ChatGPT, Cursor, Copilot)
+User defines sources:
+    myelin8 add ~/projects/_memory/ --label memory
+    myelin8 add ~/projects/_swarm/ --label swarm
+
          │
-    engram scan
-         │
-         ▼
-  ┌─ REGISTRATION ────────────────────────────────┐
-  │  SHA-256 hash │ keyword extraction │ summary   │
-  │  embedding generation │ HNSW insert │ LSH hash │
-  └───────────────────────────────────────────────┘
-         │
-    engram run (age + idle thresholds)
+    myelin8 run (processes all registered sources)
          │
          ▼
-  ┌─ TIER TRANSITIONS ───────────────────────────┐
-  │  HOT ──1 week──▶ WARM ──1 month──▶ COLD      │
-  │                                ──3 months──▶  │
-  │                                    FROZEN     │
-  └───────────────────────────────────────────────┘
+  ┌─ REGISTRATION ──────────────────────────────────┐
+  │  Content hash │ keyword extraction │ summary     │
+  │  significance scoring │ embedding (if enabled)   │
+  │  SimHash fingerprint (near-duplicate detection)  │
+  └──────────────────────────────────────────────────┘
          │
-    engram search / engram context
-         │
-         ▼
-  ┌─ RETRIEVAL (no decompression) ───────────────┐
-  │  keyword lookup → LSH hash → HNSW graph      │
-  │  → reciprocal rank fusion → rerank           │
-  │  → return summaries to AI                    │
-  └───────────────────────────────────────────────┘
-         │
-    engram recall (only when full content needed)
+    myelin8 run (significance × age × idle thresholds)
          │
          ▼
-  ┌─ RECALL ──────────────────────────────────────┐
-  │  decrypt (Rust sidecar + Touch ID)            │
-  │  → decompress (pipeline reversal)             │
-  │  → integrity check (SHA-256)                  │
-  │  → return to hot tier                         │
-  └───────────────────────────────────────────────┘
+  ┌─ TIER TRANSITIONS ─────────────────────────────┐
+  │  HOT ──significance decays──▶ WARM             │
+  │       ──1 week + idle──▶     WARM              │
+  │  WARM ──1 month──▶ COLD ──3 months──▶ FROZEN   │
+  │                                                 │
+  │  High-significance memories RESIST decay.       │
+  │  Accessed memories BOOST back toward hot.       │
+  └─────────────────────────────────────────────────┘
+         │
+    myelin8 search / myelin8 context
+         │
+         ▼
+  ┌─ RETRIEVAL (no decompression needed) ──────────┐
+  │  keyword lookup (FTS) ──┐                      │
+  │  semantic search ───────┼──▶ RRF fusion        │
+  │  Merkle partition check ┘   → return summaries │
+  └────────────────────────────────────────────────┘
+         │
+    myelin8 recall (only when full content needed)
+         │
+         ▼
+  ┌─ RECALL ─────────────────────────────────────┐
+  │  decompress (pipeline reversal)              │
+  │  → integrity check (content hash)            │
+  │  → decrypt if encrypted (Rust sidecar)       │
+  │  → return to hot tier                        │
+  └──────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Registration and Indexing
 
-When an artifact is first discovered, Engram builds a complete index entry before any compression:
+When an artifact is first discovered (`myelin8 run`), the engine builds a complete index entry BEFORE any compression. This is the "write once, search many" principle — all the expensive work happens at ingest, not at query time.
 
-| Step | What's Created | Stored In |
-|------|---------------|-----------|
-| SHA-256 hash | Integrity fingerprint (quantum-safe: Grover reduces to 128-bit, above NIST SP 800-57 minimum) | `artifact-registry.json` |
-| Keyword extraction | Top 30 keywords by frequency | `semantic-index.json` |
-| Summary generation | First heading + paragraph (md), field names + count (jsonl) | `semantic-index.json` |
-| Embedding (if enabled) | 384-dim vector via all-MiniLM-L6-v2 | `embeddings-hot.npy` |
-| HNSW insert | Nearest-neighbor graph entry | `hnsw-hot.bin` |
-| LSH hash | Hash bucket assignment for O(1) lookup | `lsh-tables.npz` |
-| Timestamps | Created, last accessed, last modified | `artifact-registry.json` |
+| Step | What's Created | Purpose |
+|------|---------------|---------|
+| Content hash (SHA-256) | Integrity fingerprint | Dedup, tamper detection, Merkle leaf |
+| Keyword extraction | Top 30 terms by frequency | Full-text search without reading content |
+| Summary | First heading + paragraph (md), field names + count (jsonl) | Token-efficient retrieval — return summary, not full content |
+| Significance score | Heuristic importance weight (0.0 - 1.0) | Determines tier decay rate |
+| SimHash fingerprint | 256-bit semantic fingerprint | Near-duplicate detection (Hamming distance) |
+| Embedding (if enabled) | 384-dim vector via all-MiniLM-L6-v2 | Semantic search for fuzzy/paraphrased queries |
+| HNSW insert (if enabled) | Nearest-neighbor graph entry | Fast approximate vector search |
+| Timestamps | Created, last accessed, last modified | Age + idle calculations for tiering |
 
-Gzip-compressed files (`.jsonl.gz` from Claude) are decompressed in memory for indexing. The file on disk stays compressed.
+Gzip-compressed files (`.jsonl.gz` from Claude subagents) are decompressed in memory for indexing. The file on disk stays compressed.
+
+---
+
+## Significance Scoring
+
+Human memory is selective because it's useful. We remember corrections, decisions, and novel encounters. We forget routine operations. This engine applies the same principle.
+
+At ingest, each artifact is scored:
+
+| Signal Detected | Score | Rationale |
+|---|---|---|
+| User correction ("no, not that", "stop", rephrasing) | 0.95 | Corrections change behavior — highest learning signal |
+| User said "remember this" | 1.0 | Explicit instruction to retain |
+| Contains decision language ("we decided", "because", "going with") | 0.85 | Decisions are the most-queried memories |
+| Architectural/design choice | 0.80 | Long-lived, frequently referenced |
+| Error + fix pattern | 0.60 | Valuable but time-limited |
+| New concept first encountered | 0.50 | Novelty signal — may or may not matter later |
+| Routine file read / grep output | 0.10 | Almost never queried again |
+| Tool call boilerplate | 0.05 | Never queried — skip indexing entirely |
+
+**Hebbian reinforcement:** When a memory is accessed via `search` or `recall`, its significance score increases. Memories that get referenced stay hot. Memories that are never referenced decay through tiers faster.
+
+**Supersession:** When a new decision contradicts an older one ("we changed from PostgreSQL to SQLite"), the older decision's significance drops and the new one inherits the higher score.
+
+This is significance *heuristics* — pattern matching on signal characteristics, not cognitive comprehension. Imperfect but better than treating every token equally.
 
 ---
 
 ## Tier Transitions
 
-| Transition | Age Threshold | Idle Threshold |
-|-----------|--------------|----------------|
-| Hot → Warm | 1 week | 3 days |
-| Warm → Cold | 1 month | 2 weeks |
-| Cold → Frozen | 3 months | 1 month |
+Transitions are driven by **significance × age × idle time**, not age alone.
 
-Both conditions (age AND idle) must be met. All thresholds configurable in `config.json`.
+| Transition | Base Age | Base Idle | Modified By |
+|---|---|---|---|
+| Hot → Warm | 1 week | 3 days | High significance delays transition |
+| Warm → Cold | 1 month | 2 weeks | Accessed memories boost back |
+| Cold → Frozen | 3 months | 1 month | Pinned memories never freeze |
 
-### Full warm transition walkthrough
+A critical decision from 6 months ago can stay in hot tier if it's still being referenced. A routine grep from yesterday can skip warm and go straight to cold if its significance score is below threshold.
+
+All thresholds configurable in `config.json`.
+
+### Warm transition walkthrough
 
 ```
-File: session-2025-09-12.jsonl (1.5 MB)
-  Age: 8 days (> 1 week threshold)
-  Idle: 5 days (> 3 days threshold)
-  Decision: HOT → WARM
+File: session-2025-09-12.jsonl (1.5 MB, significance: 0.3)
+  Age: 8 days (> 1 week), Idle: 5 days (> 3 days)
+  Significance too low to resist → HOT → WARM
 
-  ├─ Pipeline reads raw content
-  │
   ├─ Stage 1: JSON minification
-  │   Strip whitespace, shorten formatting
+  │   Strip whitespace, normalize formatting
   │   1.5 MB → 1.0 MB (33% removed)
   │
   ├─ Stage 2: zstd level 3 compression
   │   1.0 MB → 340 KB (4.4x from original)
   │
-  ├─ Stage 3 (if encryption enabled):
-  │   In-process Rust encrypt with warm tier's public key
-  │   ML-KEM-768 + X25519 hybrid KEM → AES-256-GCM
-  │   340 KB → 342 KB (.encf file)
-  │   Public key only — no private key needed to encrypt
-  │
-  ├─ Original file deleted (or kept if keep_originals=true)
-  │
-  ├─ Metadata updated:
-  │   tier=warm, compressed_path=session.jsonl.zst.encf
-  │
-  ├─ Embedding truncated:
+  ├─ Embedding truncated (if enabled):
   │   384d float32 → 256d float32 (Matryoshka — drop last 128 dims)
   │
-  ├─ HNSW entry moved from hot graph to warm graph
-  │
-  └─ Index entry updated: tier=warm
+  └─ Index entry updated: tier=warm, compressed_path=session.jsonl.zst
 ```
 
-### Full cold transition walkthrough
+### Cold transition walkthrough
 
 ```
-Warm artifact: session.jsonl.zst.encf (342 KB compressed+encrypted)
-  Age: 5 weeks (> 1 month threshold)
-  Idle: 3 weeks (> 2 weeks threshold)
-  Decision: WARM → COLD
+Warm artifact: session.jsonl.zst (340 KB)
+  Age: 5 weeks, Idle: 3 weeks → WARM → COLD
 
-  ├─ Decrypt (if encrypted):
-  │   Rust sidecar retrieves warm private key from Keychain
-  │   Key held in Zeroizing<T> wrapper in mlock'd memory
-  │   In-process ML-KEM-768 + X25519 decapsulation → HKDF-SHA256 → AES-256-GCM decrypt
-  │   Zeroizing drop fires on all exit paths (including errors and panics)
-  │   342 KB → 340 KB (.zst file)
-  │
   ├─ Decompress warm zstd back to raw content
   │   340 KB → 1.0 MB (minified JSON)
   │
   ├─ Stage 1: Boilerplate stripping
-  │   The 3,000-token system prompt repeated in every session:
-  │     "You are Claude, an AI assistant. <system-reminder>..."
+  │   The 3,000-token system prompt repeated in every session
   │   Replaced with: BOILERPLATE_REF:a3f7b2e1 (64 bytes)
-  │   Original stored once in ~/.engram/boilerplate/a3f7b2e1.boilerplate
+  │   Original stored once in ~/.myelin8/boilerplate/
   │   Content reduced by 40-70%
   │   1.0 MB → 400 KB
   │
   ├─ Stage 2: JSON minification (cleanup pass)
   │
   ├─ Stage 3: Dictionary-trained zstd level 9
-  │   The compression dictionary (112 KB, trained on your 500 sessions)
-  │   already knows your JSON schema, common tokens, tool call formats.
-  │   It only compresses what's actually unique to this session.
+  │   Dictionary (112 KB) trained on your sessions knows your
+  │   JSON schema, common tokens, tool call formats.
+  │   Only compresses what's unique to this session.
   │   400 KB → 150 KB (10x from original)
   │
-  ├─ Stage 4 (if encryption):
-  │   In-process Rust encrypt with cold tier's public key
-  │   ML-KEM-768 + X25519 hybrid KEM → AES-256-GCM
-  │   Different keypair than warm — compromise warm, cold stays safe
-  │
-  ├─ Embedding truncated:
+  ├─ Embedding truncated (if enabled):
   │   256d float32 → 128d int8 quantized (4x smaller)
   │
-  ├─ HNSW entry moved to cold graph
-  │
-  └─ PQ codebook encodes the embedding:
-      128 dims → 8 uint8 centroid indices (8 bytes)
+  └─ Index entry updated: tier=cold
 ```
 
-### Full frozen transition walkthrough
+### Frozen transition walkthrough
 
 ```
-Cold artifact: session.jsonl.cold.zst.encf (152 KB compressed+encrypted)
-  Age: 4 months (> 3 months threshold)
-  Idle: 6 weeks (> 1 month threshold)
-  Decision: COLD → FROZEN
+Cold artifact: session.jsonl.cold.zst (150 KB)
+  Age: 4 months, Idle: 6 weeks → COLD → FROZEN
 
-  ├─ Decrypt cold artifact (sidecar in-process crypto + cold private key)
-  │
   ├─ Decompress cold zstd (using trained dictionary)
   │
-  ├─ Restore boilerplate references:
-  │   BOILERPLATE_REF:a3f7b2e1 → look up in boilerplate store
-  │   → full system prompt text restored
+  ├─ Columnar Parquet conversion
+  │   JSONL rows transposed to columns:
   │
-  ├─ Stage 1: Boilerplate strip (fresh pass for frozen pipeline)
+  │   role column:      ["user","assistant","user",...]
+  │     → cardinality 2 → run-length encoding → ~0 bytes
   │
-  ├─ Stage 2: Minify JSON
+  │   timestamp column: [1710000000, 1710000060, 1710000120,...]
+  │     → monotonically increasing → delta encoding → ~0 bytes
   │
-  ├─ Stage 3: Columnar Parquet conversion
-  │   JSONL rows:
-  │     {"role":"user","content":"What about auth?","timestamp":1710000000}
-  │     {"role":"assistant","content":"Here's my analysis...","timestamp":1710000060}
-  │     {"role":"user","content":"And the JWT flow?","timestamp":1710000120}
+  │   content column:   actual conversation text
+  │     → dictionary encoding (repeated phrases) + zstd-19
   │
-  │   Transposed to columns:
-  │     role column:      ["user","assistant","user","assistant",...]
-  │       → cardinality 2 → run-length encoding → ~0 bytes
-  │     timestamp column: [1710000000, 1710000060, 1710000120,...]
-  │       → monotonically increasing → delta encoding → ~0 bytes
-  │       (deltas are [60, 60, 60,...] → single value repeated)
-  │     content column:   actual conversation text
-  │       → dictionary encoded + zstd level 19
-  │       → this is the only column with real entropy
+  │   150 KB → 50 KB (30x from original)
   │
-  │   Result: 50 KB (30x from original 1.5 MB)
+  │   Column-selective reads: "give me all decisions" reads
+  │   only the content column with type=decision filter.
+  │   Never touches timestamps, roles, or tool calls.
   │
-  ├─ Stage 4 (if encryption):
-  │   In-process Rust encrypt with frozen tier's public key
-  │   ML-KEM-768 + X25519 hybrid KEM → AES-256-GCM
-  │   Third independent keypair
+  ├─ Embedding compressed (if enabled):
+  │   128d int8 → 48-byte packed binary (Product Quantization)
   │
-  ├─ Embedding truncated:
-  │   128d int8 → 64d binary via numpy.packbits
-  │   96 bytes per artifact
-  │   Searched via Hamming distance (CPU popcount instruction)
-  │
-  └─ LSH hash updated for O(1) frozen-tier lookup
+  └─ Index entry updated: tier=frozen
 ```
+
+---
+
+## Compression Pipeline
+
+Each tier applies progressively more aggressive compression:
+
+```
+HOT    ████████████████████████████████████████  1,500 KB   1x     instant
+WARM   ████████████                              340 KB    4-5x    ~10ms
+COLD   ██████                                    150 KB    8-12x   ~200ms
+FROZEN ██                                        50 KB    20-50x   ~2s
+```
+
+| Tier | Techniques Applied | Ratio |
+|------|---|---|
+| Hot | None (original plaintext) | 1x |
+| Warm | JSON minification + zstd-3 | 4-5x |
+| Cold | Boilerplate stripping + minification + dictionary-trained zstd-9 | 8-12x |
+| Frozen | Columnar Parquet + dictionary encoding + RLE + delta + zstd-19 | 20-50x |
+
+The dictionary (`~/.myelin8/compression.dict`, 112 KB) is trained on representative sessions and reused across all cold/frozen compressions. It knows your JSON schema, so it only compresses what's unique to each session.
 
 ---
 
 ## Search and Retrieval
 
-Search never decompresses artifacts. It operates entirely on the precomputed index. When embeddings are available (`pip install engram[embeddings]`), search uses hybrid retrieval. Without embeddings, it falls back to keyword-only.
-
-### Full retrieval flow
+Search NEVER decompresses data. The semantic index (built at registration time) contains everything needed to answer queries: keywords, summaries, significance scores, content hashes.
 
 ```
-Query: "authentication refactor"
+Query: "what did we decide about the database?"
   │
-  ├─ Layer 1: KEYWORD LOOKUP TABLE — O(1) per keyword
-  │   Inverted index in semantic-index.json:
-  │     "authentication" → [artifact_42, artifact_891, artifact_2204]
-  │     "refactor" → [artifact_42, artifact_155, artifact_891]
-  │   Intersection: [artifact_42, artifact_891]
-  │   Cost: O(1) hash lookup per keyword
+  ├─ FTS keyword lookup: "decide" + "database"
+  │   → 3 matches (artifacts a3f8, b7d1, c9f2)
   │
-  ├─ Layer 2: LSH HASH TABLE — O(1)
-  │   Hash the query embedding with 12 random hyperplanes
-  │   across 4 independent hash tables (4096 buckets each)
-  │   hash(query_embedding) → bucket_7294
-  │   bucket_7294 contains: [artifact_42, artifact_891, artifact_3001]
-  │   Cost: O(1) hash + O(bucket_size) scan
+  ├─ Semantic search (if embeddings enabled):
+  │   → 5 matches by cosine similarity
   │
-  ├─ Layer 3: HNSW GRAPH — O(log n) per tier
-  │   Navigate nearest-neighbor graph at each tier's dimension:
-  │     Hot graph (384d float32): top matches from recent files
-  │     Warm graph (256d float32): top matches from last month
-  │     Cold graph (128d int8): top matches from older files
-  │     Frozen (64d binary): Hamming distance via popcount
-  │   Top-5: [artifact_42, artifact_891, artifact_3001, artifact_155, artifact_7]
-  │   Cost: O(log n) per tier
+  ├─ RRF fusion: merge both result sets
+  │   → artifacts appearing in BOTH rank highest
+  │   → b7d1 ranks #1 (keyword match + semantic match)
   │
-  ├─ Layer 4: RECIPROCAL RANK FUSION
-  │   Merge keyword results + vector results:
-  │   RRF_score(artifact) = Σ(1/(60 + rank_i)) for each ranked list
-  │   Dedup by artifact path (same artifact found by both searches)
-  │   Sort by combined RRF score
-  │   Cost: O(results) — trivial
-  │
-  ├─ Layer 5: RERANK (optional)
-  │   Top results re-scored with full cosine similarity
-  │   on original embeddings (not the truncated tier versions)
-  │   Cost: O(top_k) — only on the final result set
-  │
-  └─ Output: ranked list of artifacts with summaries
-     The AI sees summaries at 10-20% of token cost
-     Full content available via engram recall <path>
+  └─ Return: summary of b7d1 (200 tokens)
+     NOT the full 10,000-token session
 ```
 
-No decompression happened. The index, embeddings, and graphs are always in memory. The compressed files on disk were never touched.
-
----
-
-## HNSW Vector Index
-
-Each tier maintains its own Hierarchical Navigable Small World (HNSW) graph at its native embedding dimension. This gives O(log n) approximate nearest neighbor search instead of O(n) linear scan.
-
-### Per-tier graphs
-
-| Tier | Dimension | File | Backend |
-|------|-----------|------|---------|
-| Hot | 384-d float32 | `hnsw-hot.bin` | hnswlib (or numpy fallback) |
-| Warm | 256-d float32 | `hnsw-warm.bin` | hnswlib (or numpy fallback) |
-| Cold | 128-d float32 | `hnsw-cold.bin` | hnswlib (or numpy fallback) |
-| Frozen | 64-d float32 | `hnsw-frozen.bin` | hnswlib (or numpy fallback) |
-
-### HNSW parameters
-
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| `M` | 16 | Connections per node (balances recall vs memory) |
-| `ef_construction` | 200 | Build-time quality (higher = better graph, slower build) |
-| `ef` | 50 | Search-time quality (higher = better recall, slower search) |
-| `space` | cosine | Similarity metric for float embeddings |
-
-### Graceful fallback
-
-When `hnswlib` is not installed (`pip install hnswlib`, ~1.3 MB, no server), the index falls back to brute-force numpy cosine similarity. Same API, same results, just O(n) instead of O(log n). The backend is auto-detected at import time.
-
-### Tier transitions
-
-When an artifact moves tiers, its embedding is truncated (Matryoshka) and re-inserted into the new tier's graph. The old tier entry is removed. On recall, the embedding is restored to full 384-d and re-inserted into the hot graph.
+**Token savings:** 200 tokens returned vs 10,000+ tokens from reading the raw session. The AI gets the answer. The context window stays clean.
 
 ---
 
 ## Hybrid Search
 
-When embeddings are available, search uses hybrid retrieval combining keyword search (BM25-style from `SemanticIndex`) with vector search (HNSW + LSH) via Reciprocal Rank Fusion. Without embeddings, it falls back to keyword-only.
+No single search method handles every query type. Different queries fail in different ways:
 
-### Reciprocal Rank Fusion (RRF)
+| Query Type | FTS Catches | FTS Misses |
+|---|---|---|
+| "database migration" | Exact term match | Paraphrased as "schema changes" |
+| "that refactor from last week" | "refactor" matches | "that" and "last week" are noise |
 
-RRF merges results from multiple ranked lists without requiring score normalization. The formula:
+| Query Type | Semantic Catches | Semantic Misses |
+|---|---|---|
+| "schema changes" | Conceptually similar to "database migration" | Might also return "API schema" (wrong context) |
+| "meeting with Adam" | Related to "Adam" discussions | Can't distinguish which Adam |
 
-```
-RRF_score(artifact) = sum(1 / (k + rank_i)) for each ranked list i
-```
+**Reciprocal Rank Fusion (RRF)** combines results from FTS and semantic search. An artifact that ranks well in BOTH methods gets boosted. An artifact that only ranks in one method ranks lower. This covers more query variations than either method alone.
 
-Where `k=60` is the standard constant (Cormack et al., 2009). This handles the score distribution mismatch between keyword (BM25 scores) and vector (cosine similarities) without calibration.
-
-### Contextual retrieval (Anthropic technique)
-
-Before embedding, each artifact's summary is prepended to its content. This is Anthropic's contextual retrieval technique: by including document-level context alongside the chunk content, the embedding captures semantic meaning at both granularities. This yields ~49% retrieval improvement with zero additional LLM calls and no API dependency (embeddings are generated locally via `all-MiniLM-L6-v2`).
-
-### Reranking
-
-The top results from RRF can be optionally re-scored with full cosine similarity on the original (non-truncated) embeddings. This is more expensive but produces higher-quality final rankings. Results without embeddings keep their RRF score with a slight penalty so embedding-based results rank higher when scores are close.
-
-### Fallback chain
-
-```
-1. Both keyword + vector available → RRF fusion → rerank → results
-2. Only keyword available → keyword results with RRF scoring → results
-3. Only vector available → vector results with RRF scoring → results
-4. Neither available → empty results
+```python
+# RRF formula (Cormack et al., 2009)
+# k=60 dampens the impact of high-ranking outliers
+score(artifact) = Σ 1 / (k + rank_in_method_i)
 ```
 
-Vector search failure (e.g., model not loaded, dimension mismatch) is caught and falls back silently to keyword-only. No search query ever throws an exception.
+Search cascade order:
+1. **FTS keyword lookup** — fast, exact, always available
+2. **HNSW vector search** — semantic, approximate (if embeddings enabled)
+3. **RRF fusion** — combines 1 + 2
+4. **Brute-force cosine** — fallback if HNSW unavailable
+5. **Spreading activation** — CoGraph traversal for related artifacts (if enabled)
+
+---
+
+## Merkle Tree
+
+Dual-purpose: integrity verification AND search acceleration.
+
+### Integrity (Anti-Hallucination)
+
+Every artifact gets a leaf in a SHA3-256 binary hash tree. The root hash covers all artifacts across all four tiers.
+
+```
+                  Root: 061e... (SHA3-256)
+                    /              \
+             Hash AB                Hash CD
+            /      \               /      \
+      Hash A      Hash B     Hash C      Hash D
+        |           |          |           |
+   Session 1   Session 2   Session 3   Session 4
+    (hot)       (warm)      (cold)     (frozen)
+```
+
+When the AI claims "we decided X in Session 3," produce a Merkle proof — a path of hashes from Session 3's leaf to the root. If the proof verifies, the conversation is real. If it doesn't, the AI fabricated it.
+
+### Search Acceleration
+
+The Merkle tree also accelerates search by enabling:
+
+1. **Existence checks without decompression.** Before searching a cold/frozen tier, check if the content hash exists in the tree. If not, skip that tier entirely. O(log n).
+
+2. **Change detection for incremental indexing.** When the root hash changes, walk the tree to find which subtree changed. Only re-index the changed branch.
+
+3. **Partition-aware routing.** Branches organized by time/project namespace. A query scoped to "project X, last 30 days" traverses only the relevant subtree.
+
+The tree runs in compiled Rust (`myelin8-vault` sidecar) for performance. The sidecar also maintains an inverted keyword index mapping keyword hashes to content hashes — enabling term lookups without exposing plaintext keywords.
 
 ---
 
 ## Recall
 
-When the AI needs the full content of a compressed/encrypted artifact:
+When the summary isn't enough and full content is needed:
 
-```
-engram recall ~/.claude/projects/.../session-2025-06.jsonl
-  │
-  ├─ Step 1: Registry lookup
-  │   Look up in artifact-registry.json:
-  │     tier: cold
-  │     compressed_path: session-2025-06.jsonl.cold.zst.encf
-  │     encrypted: true
-  │     sha256: 92d54fa6...
-  │
-  ├─ Step 2: Decrypt (if encrypted)
-  │   Python sends "DECRYPT <path> <output> cold" to engram-vault
-  │   Rust sidecar:
-  │     → Retrieves cold private key from macOS Keychain
-  │     → Touch ID prompt on Apple Silicon
-  │     → Key held in Zeroizing<T> wrapper in mlock'd memory (not swappable)
-  │     → In-process ML-KEM-768 + X25519 decapsulation → HKDF-SHA256 → AES-256-GCM
-  │     → Zeroizing<T> drop fires on all exit paths (normal, error, panic)
-  │     → Decrypted .zst file returned
-  │   Python receives: "OK"
-  │   Python never saw the private key.
-  │
-  ├─ Step 3: Decompress
-  │   Pipeline reversal based on tier:
-  │     Cold: zstd decompress using trained dictionary
-  │           → restore boilerplate references from store
-  │           (BOILERPLATE_REF:a3f7b2e1 → full system prompt)
-  │     Frozen: Parquet → JSONL conversion
-  │             → restore boilerplate references
-  │
-  ├─ Step 4: Integrity check
-  │   SHA-256 of decompressed content compared against stored hash
-  │   Mismatch → abort + warning (file was tampered or corrupted)
-  │   Match → proceed
-  │
-  ├─ Step 5: Restore to hot tier
-  │   File written back to original location
-  │   Metadata updated: tier=hot, last_accessed=now
-  │   Embedding restored to full 384d float32 in hot HNSW graph
-  │
-  └─ AI reads the file normally
-     On next engram run, it'll re-tier based on age + idle time
+```bash
+myelin8 recall ~/.claude/projects/.../session-2025-09-12.jsonl
 ```
 
-Retrieval times: warm ~10ms, cold ~500ms, frozen ~5 seconds. Add ~1-2 seconds for Touch ID prompt if encrypted.
-
----
-
-## Encryption
-
-### What Gets Encrypted
-
-When encryption is enabled, **everything** is encrypted:
-
-| Component | Encrypted? | How |
-|-----------|-----------|-----|
-| Compressed artifacts (.zst) | Yes | In-process Rust crypto with tier's public key (ML-KEM-768 + X25519 hybrid KEM, AES-256-GCM) |
-| Semantic index (keywords, summaries) | Yes | Bundled into `index.tar.encf` on lock |
-| Embeddings (all .npy files) | Yes | Part of index bundle |
-| HNSW graphs (all .bin files) | Yes | Part of index bundle |
-| LSH hash tables (.npz) | Yes | Part of index bundle |
-| PQ codebook (.npz) | Yes | Part of index bundle |
-| Artifact registry (.json) | Yes | Part of index bundle |
-| Boilerplate store (prompt fragments) | Yes | Bundled into `boilerplate.tar.encf` on lock |
-| Audit log | Yes | Part of index bundle |
-| Compression dictionary | Yes | Part of index bundle |
-| Config file | No — contains public keys and key source identifiers (service/account names). Not secret but treat as sensitive metadata. | 0600 permissions |
-
-### Index Encryption
-
-The index is encrypted as a bundle at session end and decrypted at session start:
-
-```
-Session start:
-  engram unlock (or any engram command auto-unlocks)
-    → Rust sidecar decrypts index.tar.encf (Touch ID)
-    → Extracts all index files to ~/.engram/ with 0600 permissions
-    → Index loaded into memory, ready for search
-
-During session:
-  Index files exist as plaintext in ~/.engram/ (0700 directory)
-  All search, context, and tier operations work normally
-
-Session end:
-  engram lock
-    → Bundles all index files into index.tar
-    → Rust sidecar encrypts to index.tar.encf
-    → Deletes all plaintext index files
-    → Deletes boilerplate store (encrypted separately)
-    → Only encrypted .encf files remain on disk
-```
-
-When locked, an attacker with filesystem access sees only encrypted blobs. No keywords, no summaries, no embeddings, no file paths, no session metadata.
-
-### .encf v2 File Format
-
-All encrypted files use the `.encf` v2 binary format (no external tools required):
-
-```
-Offset  Size     Field
-0       4        ENCF magic bytes
-4       1        Version (2)
-5       2        KEM ciphertext length (little-endian)
-7       1088     ML-KEM-768 ciphertext
-1095    32       X25519 ephemeral public key
-1127    16       HKDF-SHA256 salt
-1143    12       AES-256-GCM nonce
-1155    8        Plaintext length (little-endian)
-1163    variable Ciphertext + 16-byte GCM authentication tag
-```
-
-Algorithms: ML-KEM-768 (FIPS 203) + X25519 hybrid KEM for key encapsulation, HKDF-SHA256 (SP 800-56C) for key derivation, AES-256-GCM (FIPS 197 + SP 800-38D) for authenticated encryption.
-
----
-
-## Rust Crypto Sidecar
-
-`engram-vault` is a compiled Rust binary that handles all cryptographic operations in-process. No external binaries. All crypto is performed using Rust crates directly (ML-KEM-768, X25519, AES-256-GCM, SHA3-256, HMAC, HKDF).
-
-### Why Rust, not Python
-
-Python cannot securely handle private keys:
-- Strings are immutable — can't be zeroed
-- Garbage collector decides when memory is freed
-- No `mlock` — key material can be swapped to disk
-- No `mprotect` — any same-UID process can read `/proc/<pid>/mem`
-
-### What the sidecar does
-
-```
-Python sends:   DECRYPT <input> <output> <tier>
-Sidecar:        1. Reads private key from macOS Keychain (Security.framework)
-                   (pub(crate) visibility on all keychain functions for defense-in-depth)
-                   (tier validation inside keychain functions, redundant with main.rs)
-                   (set-first-then-delete-retry pattern to avoid destroying keys on failed writes)
-                2. Key held in Zeroizing<T> wrapper in mlock'd memory (not swappable)
-                3. In-process ML-KEM-768 + X25519 decapsulation
-                4. HKDF-SHA256 key derivation (ikm in Zeroizing<T>)
-                5. AES-256-GCM decryption (aes_key in Zeroizing<T>)
-                6. Zeroizing<T> drop fires on ALL exit paths — normal, error, and panic
-                7. Core dumps disabled (setrlimit RLIMIT_CORE=0)
-                8. Path traversal prevention: validate_path rejects ".." sequences
-                9. File size limit: 256 MB max to prevent mlock exhaustion
-Python receives: OK
-```
-
-The private key never: enters Python, touches disk, appears in process arguments, hits swap, survives a crash dump. No external process is spawned — all crypto is in-process.
-
-### Protocol
-
-```
-ENCRYPT <input> <output> <tier>  → OK | ERROR <msg>
-DECRYPT <input> <output> <tier>  → OK | ERROR <msg>
-KEYGEN <tier>                     → OK <pubkey> | ERROR <msg>
-PING                              → PONG
-QUIT                              → BYE
-```
-
-Input validation: paths with newlines or null bytes are rejected (prevents command injection via the line protocol). Tier names validated against allowlist.
-
----
-
-## Key Management
-
-### Simple mode (one key for all tiers)
-
-```json
-{
-  "encryption": {
-    "enabled": true,
-    "envelope_mode": false,
-    "recipient_pubkey": "age1..."
-  }
-}
-```
-
-One public key encrypts everything. Decryption uses a single identity.
-
-### Envelope mode (per-tier keypairs, per-artifact DEKs)
-
-```json
-{
-  "encryption": {
-    "enabled": true,
-    "envelope_mode": true,
-    "warm_pubkey": "age1...",
-    "cold_pubkey": "age1...",
-    "frozen_pubkey": "age1...",
-    "warm_private_source": "keychain:engram:warm-key",
-    "cold_private_source": "keychain:engram:cold-key",
-    "frozen_private_source": "keychain:engram:frozen-key"
-  }
-}
-```
-
-Each tier has independent keypairs. Each artifact gets a unique 256-bit DEK. Compromise one tier, others stay safe. Key rotation re-wraps DEK headers in O(metadata), not O(data).
-
-### Key sources (where private keys live)
-
-| Source | Format | Security Level |
-|--------|--------|---------------|
-| macOS Keychain + Touch ID | `keychain:engram:warm-key` | Hardware-bound on Apple Silicon |
-| HashiCorp Vault | `command:vault kv get ...` | Enterprise-grade |
-| Cloud KMS | `command:aws secretsmanager ...` | Cloud-managed |
-| Environment variable | `env:VAR_NAME` | CI/CD only |
-| File on disk | Blocked | Deliberately disabled |
-
----
-
-## Audit Logging
-
-**Disabled by default.** Engram is a compression tool first. Logging is opt-in for users who need it.
-
-Enable with `"audit_log": true` in config. For PQ-encrypted syslog forwarding, see [Secure Syslog](#secure-syslog-pq-encrypted) below.
-
-### Why disabled by default
-
-Engram's primary job is compression + indexing. Most users don't need audit logs. Logging creates data that must itself be secured — an audit log of encryption operations is itself sensitive metadata. If you don't need it, don't enable it. If you do need it, it's built to SIEM-grade standards.
-
-### Verbose logging mode
-
-For organizations with compliance requirements (SOC 2, HIPAA, GDPR Article 30, PCI-DSS), a more verbose logging mode is available:
-
-```json
-{
-  "audit_log": true,
-  "audit_verbose": true
-}
-```
-
-Verbose mode adds: operation durations, tier transition details, search hit counts with tier breakdown, key rotation events with generation IDs, and lock/unlock session boundaries. It does NOT add file paths, content, query strings, or key material — the PII/secret gate still applies.
-
-**Enabling verbose logging is your decision based on your compliance posture.** Engram provides the knobs; you own the architecture. Setting up log forwarders, configuring SIEM ingestion, sizing storage, defining retention policies, and building detection rules is your responsibility. Every environment is different — a single-user laptop and a 500-seat enterprise have fundamentally different logging needs.
-
-### Secure the full log path
-
-If you enable verbose logging and forward to a SIEM, **every layer the log data passes through must be secured independently:**
-
-1. **At source** — Engram encrypts log entries individually via the Rust sidecar (ML-KEM-768 + AES-256-GCM). This is handled for you.
-2. **In transit** — Use PQ-safe transport where available. TLS 1.3 with ML-KEM key agreement is supported by some forwarders. If your forwarder only supports classical TLS, the per-entry PQ encryption from step 1 still protects content — but the metadata envelope (timestamps, source IP, syslog headers) is only classically protected. Evaluate whether that's acceptable for your threat model.
-3. **At the SIEM** — Entries arrive PQ-encrypted. Storage encryption (dm-crypt, BitLocker, cloud KMS) adds defense in depth. Ensure the SIEM's own access controls, retention policies, and index encryption meet your compliance bar.
-4. **At the analyst workstation** — Decryption requires the `index` tier private key from the OS credential vault. Ensure workstations enforce full-disk encryption, credential store protections, and session timeouts.
-5. **In backups and archives** — Encrypted log entries stay encrypted in backups. But verify that your backup pipeline doesn't decrypt-then-re-encrypt with weaker algorithms, and that backup access controls match production.
-
-PQ cryptography (ML-KEM-768, FIPS 203) is used at every Engram-controlled layer. For layers outside Engram's control (your network, your SIEM, your backup system), adopt PQC where your infrastructure supports it. The base cryptographic code is all here in the sidecar — no external crypto dependencies are introduced.
-
-### Third-party risk
-
-Engram deliberately avoids introducing third-party dependencies into the logging and forwarding path. The sidecar handles all cryptographic operations using vendored Rust crates that are compiled into the binary. No runtime calls to external services, no telemetry, no phone-home behavior.
-
-If you integrate with external forwarders (Filebeat, Splunk Universal Forwarder, Fluentd, etc.), **you are introducing their dependency and trust chain into your logging path.** Before deploying any forwarder:
-
-- Vet the forwarder's own dependencies and update cadence
-- Disable all telemetry, analytics, and phone-home features. Most forwarders ship with these enabled by default. Cutting outbound network calls to vendor endpoints is table stakes
-- Pin forwarder versions and verify checksums
-- Run the forwarder with minimal permissions (read-only on the encrypted log file, network access only to your SIEM endpoint)
-- Audit the forwarder's own logging — some forwarders log the content they forward in plaintext to their own debug logs
-
-No third-party component should be trusted by default. If it hasn't been fully vetted with controls like network phone-home specifically disabled, it doesn't belong in your logging pipeline.
-
-### The security double-edged sword
-
-More logging is not unconditionally better. This is security's classic double-edged sword:
-
-**Pros of verbose logging:**
-- Stronger audit trail for compliance and incident response
-- Faster detection of anomalous access patterns
-- Evidence for forensic reconstruction after a breach
-- Satisfies regulatory requirements that mandate detailed access records
-
-**Cons of verbose logging:**
-- More metadata to protect — a detailed audit log is itself a high-value target. An attacker who compromises your SIEM learns exactly what was accessed, when, and how often
-- Larger attack surface — every forwarder, every transport hop, every SIEM ingestion point is a potential interception or injection vector
-- Storage and retention burden — verbose logs grow fast. Retention policies become compliance obligations, not just housekeeping
-- False sense of security — logging that nobody monitors is worse than no logging, because it creates the impression of oversight without the reality
-
-Know your compliance policy. Some frameworks (HIPAA, PCI-DSS, FedRAMP) mandate specific log verbosity, retention windows, and access audit granularity that go beyond what the default mode provides. Read your controls matrix. If it requires more verbose logging, more granular event capture, or domain-specific fields — you build it. That's the beauty of AI plugins: they're modular like Legos. Engram gives you the base audit engine, the PQ-encrypted transport, and the PII/secret gate. You snap on the logging verbosity, the forwarder config, the SIEM integration, and the retention policy that your compliance posture demands. The plugin architecture means you extend without forking. Your compliance module is yours; the core engine stays clean.
-
-Secure every layer it touches. Monitor what you collect. Delete what you no longer need.
-
-### What's logged
-
-```
-2026-03-18T11:05:00Z TIER hot>warm 9.4x abc7f2
-2026-03-18T11:05:01Z TIER warm>cold 11.2x d4e891
-2026-03-18T12:30:00Z RECALL cold abc7f2
-2026-03-18T12:30:01Z DECRYPT warm abc7f2 ok
-2026-03-18T14:00:00Z SEARCH 5hits
-2026-03-18T15:00:00Z ROTATE warm gen1>gen2 37headers
-```
-
-Timestamp (ISO 8601 UTC), operation, tier, 6-char artifact hash, outcome. That's it.
-
-### What's NOT logged
-
-File paths, filenames, key sources, query strings, content, keywords, summaries, usernames, private keys.
-
-### PII/Secret detection
-
-Every log line passes through regex-based detection before writing. If a line matches any pattern, it's replaced with `REDACTED`:
-
-- `-----BEGIN * KEY-----` — PEM keys
-- `ssh-(rsa|ed25519) *` — SSH keys
-- `AKIA*` — AWS access keys
-- `sk-*` — API keys (OpenAI, Anthropic)
-- `ghp_*` — GitHub tokens
-- `*@*.*` — Email addresses
-- `/Users/*/`, `/home/*/` — Home paths (PII)
-- `password|secret|token|credential` — Secret keywords
-
-### Size cap
-
-10 MB maximum. After 10 MB, writes are silently dropped. User must rotate.
-
-### Encrypted at rest
-
-When `engram lock` runs, the audit log is included in the encrypted index bundle (ML-KEM-768 + AES-256-GCM via sidecar). Only encrypted .encf files remain on disk.
-
-### Secure Syslog (PQ-encrypted)
-
-For users who need centralized log collection (SOC teams, compliance, shared servers), Engram supports encrypted syslog forwarding. Audit events can be written to an encrypted log file that is periodically forwarded to your SIEM.
-
-**How it works:**
-
-```
-Audit event
-    |
-    v
-PII/secret gate (regex filter)
-    |
-    v
-Plaintext log line
-    |
-    +---> audit.log (local, 0600, encrypted at rest via engram lock)
-    |
-    +---> audit.encf.log (PQ-encrypted append log via sidecar)
-          |
-          v
-       Forward to SIEM (Splunk, QRadar, Elastic, etc.)
-       via syslog, filebeat, or splunk-forwarder
-```
-
-Enable in config:
-
-```json
-{
-  "audit_log": true,
-  "audit_syslog": {
-    "enabled": true,
-    "tier": "index",
-    "format": "json"
-  }
-}
-```
-
-Each log entry is individually encrypted with the `index` tier key via the sidecar. This means:
-
-- **In transit**: Log entries are PQ-encrypted (ML-KEM-768 + AES-256-GCM). Even if the syslog transport is compromised, the content is protected.
-- **At rest on the SIEM**: Entries remain encrypted. Decryption requires the `index` tier private key from the OS credential vault.
-- **Harvest-now-decrypt-later**: PQ encryption protects against future quantum attacks on archived logs.
-- **No plaintext on the wire**: Unlike standard syslog (RFC 5424) which transmits plaintext or relies on TLS (classical crypto), each individual log entry is independently encrypted with NIST-approved PQ algorithms.
-
-The SIEM stores encrypted blobs. To search them, use `engram search` locally (the semantic index is always available). To decrypt individual entries for incident response, use the sidecar with the `index` tier key.
-
-This is the same architecture used in enterprise SIEMs that handle classified data: encrypt at the source, store encrypted, decrypt only at the analyst's workstation with proper key access.
-
----
-
-## Lookup Tables
-
-The architecture is nested lookup tables all the way down. Every retrieval step uses precomputed data instead of recomputation — the same principle DeepSeek uses when they absorb projection matrices into precomputed operations, and MemoryFormer uses when it replaces linear layers with hash table lookups.
-
-| What's Stored Once | What It Replaces | Size | Speed |
-|-------------------|-----------------|------|-------|
-| Keyword inverted index | Scanning every file for a string | ~1 MB for 10K artifacts | O(1) per keyword |
-| Compression dictionary | Relearning compression patterns per file | 112 KB (one-time training) | 2-5x faster compression |
-| Boilerplate store | Storing 4,500 copies of the same prompt | 64 bytes per ref vs 5,000 tokens per copy | O(1) hash lookup |
-| HNSW nearest-neighbor graph | Linear scan over all embeddings | ~10 MB for 10K artifacts | O(log n) vs O(n) |
-| LSH hash tables | Full similarity computation | 4 tables × 4096 buckets | O(1) hash + bucket scan |
-| PQ codebook | Storing full 3,072-byte embeddings | 8 bytes per artifact (384x reduction) | O(M) centroid lookups |
-| Matryoshka truncation | Training separate embedding models per tier | Zero extra cost (truncate) | Same model, 4 resolutions |
-| Binary packbits | Float32 cosine similarity on frozen tier | 8 bytes per artifact (vs 1,536) | Hamming via CPU popcount |
-
-### Why this makes it efficient
-
-Without lookup tables, every search would: scan every file on disk for a keyword match, decompress candidates to check content, and compute full cosine similarity over full-dimension embeddings. With the lookup table stack:
-
-- **Keyword search drops from O(files × file_size) to O(1) per keyword.** The inverted index maps keywords to artifact IDs directly.
-- **Vector search drops from O(n × 384) to O(log n).** HNSW navigates a graph instead of computing similarity against every embedding.
-- **Frozen-tier search drops from cosine similarity (768 multiplications per pair) to Hamming distance (single popcount instruction).** Binary embeddings at 8 bytes are 192x smaller than float32 at 1,536 bytes.
-- **Compression skips 40-70% of content** because the boilerplate store replaces repeated system prompts with hash references. The compressor never sees content that was already stored once.
-- **The dictionary lets zstd skip schema learning.** Without a trained dictionary, zstd must rediscover that `"role":`, `"content":`, `"timestamp":` are common patterns in every file. With the dictionary, those patterns are precomputed byte codes.
-
-The net effect: a search across 10,000 artifacts completes in under 50ms. A recall from frozen tier takes ~5 seconds. Without lookup tables, the same search would take seconds (full scan) and recall would require decompressing every candidate to check content.
+1. Locate compressed artifact by content hash
+2. Decompress (reverse the compression pipeline for that tier)
+3. Decrypt if encrypted (Rust sidecar)
+4. Verify integrity (content hash matches registered hash)
+5. Promote back to hot tier
+6. Return plaintext content
+
+Cold recall: ~200ms. Frozen recall: ~2s. The latency is acceptable because recall is rare — search handles 90%+ of queries via summaries.
 
 ---
 
 ## Embedding Architecture
 
-Tiered embeddings follow the Matryoshka pattern — one model, four resolutions:
+Optional (`pip install myelin8[embeddings]`). Not required for FTS-only operation.
 
-| Tier | Dimensions | Type | Size per Artifact | Search Method |
-|------|-----------|------|-------------------|--------------|
-| Hot | 384 | float32 | 1,536 bytes | Cosine similarity via HNSW |
-| Warm | 256 | float32 | 1,024 bytes | Cosine similarity via HNSW |
-| Cold | 128 | int8 | 128 bytes | Quantized cosine via HNSW |
-| Frozen | 64 | binary | 8 bytes | Hamming distance via popcount |
+### Matryoshka Embeddings
 
-Total index size for 10,000 artifacts across all tiers: ~10 MB (vs ~30 MB for full-resolution everywhere).
+One embedding model (all-MiniLM-L6-v2, 384 dimensions), four resolutions per tier:
 
----
+| Tier | Dimensions | Format | Size per Vector | Purpose |
+|------|-----------|--------|----------------|---------|
+| Hot | 384 | float32 | 1,536 bytes | Full precision search |
+| Warm | 256 | float32 | 1,024 bytes | Good precision, 33% smaller |
+| Cold | 128 | int8 | 128 bytes | Quantized, 92% smaller |
+| Frozen | 64 | binary packed | 48 bytes | Coarse matching, 97% smaller |
 
-## File Permissions
+Matryoshka ("Russian doll") embeddings are truncated, not retrained. The first N dimensions of a 384-dim embedding ARE a valid N-dim embedding. This is a property of how the model was trained — each prefix is a self-contained representation at lower resolution.
 
-| File/Directory | Permissions | Why |
-|---------------|------------|-----|
-| `~/.engram/` | 0700 | Only owner can access the directory |
-| `config.json` | 0600 | Contains public keys and scan paths |
-| `artifact-registry.json` | 0600 | Contains file hashes and paths |
-| `semantic-index.json` | 0600 | Contains keywords and summaries |
-| `audit.log` | 0600 | Contains operation timestamps |
-| All `.npy`, `.bin`, `.npz` files | 0600 | Embedding and graph data |
-| All temp files | 0600 | Created via `tempfile.mkstemp` with explicit chmod |
-| Boilerplate store | 0700 | Directory containing plaintext prompt fragments |
-| Compressed artifacts | 0600 | Written via `fileutil.atomic_write_bytes` |
+### HNSW Vector Index
+
+Hierarchical Navigable Small World graphs for approximate nearest neighbor search. Per-tier graphs with tuned parameters:
+
+- `M=16` — max connections per node
+- `ef_construction=200` — build-time accuracy
+- `ef_search=50` — query-time accuracy
+
+O(log n) search vs O(n) brute force. Deferred for MVP — brute-force cosine is fast enough under 50K artifacts.
 
 ---
 
-## Threat Model
+## CoGraph (Associative Recall)
 
-### Protects against
+Co-occurrence tracking + spreading activation. When artifacts appear together in sessions, they get edges in a graph. When you search for one artifact, related artifacts surface automatically.
 
-- Data at rest on stolen/lost/compromised devices
-- "Harvest now, decrypt later" quantum attacks (ML-KEM-768)
-- Unauthorized disk reads of AI session data
-- Forensics on decommissioned hardware
-- Index metadata leakage (when locked)
-- Key material in Python memory, swap, core dumps, process args
+**Implementation:** Rust sidecar (`cograph.rs`). PPMI-weighted edges, BFS spreading activation (depth cap: 3, top_k limited for DoS prevention). In-memory only — never persisted to disk.
 
-### Does NOT protect against
+**Status:** Implemented, being evaluated. Deferred from MVP until usage data shows whether associative recall has measurable value.
 
-- Compromised process with same-UID ptrace access
-- Attacker with your Keychain password
-- Trojanized `engram-vault` binary
-- Root compromise on non-Secure-Enclave hardware
-- Malicious AI assistant that exfiltrates data before compression
-- Index metadata while unlocked during an active session
+---
+
+## Encryption (Opt-In)
+
+Available via `pip install myelin8[secure]`. Not required. Not in the default install.
+
+When enabled:
+- **ML-KEM-768 + X25519** hybrid key encapsulation (NIST FIPS 203, post-quantum safe)
+- **AES-256-GCM** authenticated encryption per artifact
+- **Per-tier keypairs** — compromise warm, cold stays safe
+- **Rust sidecar** handles all crypto — private keys never enter Python
+- **macOS Keychain** integration for key storage (Touch ID)
+
+See `docs/KEY-STORAGE-GUIDE.md` for setup.
+
+---
+
+## File Layout
+
+```
+~/.myelin8/
+├── config.json           # User-defined sources (via `myelin8 add`), tier thresholds, feature flags
+├── artifact-registry.json # Per-artifact metadata (hash, tier, timestamps, significance)
+├── semantic-index.json    # Keywords, summaries per artifact (search index)
+├── compression.dict       # Trained zstd dictionary (112 KB)
+├── embeddings/            # Per-tier .npy files (if embeddings enabled)
+├── hnsw-*.bin             # Per-tier HNSW graphs (if enabled)
+└── (frozen .parquet files stored alongside compressed artifacts)
+```
+
+---
+
+## Protected Paths
+
+Myelin8 indexes AI assistant directories but NEVER modifies them:
+
+```python
+PROTECTED_PATHS = [
+    Path.home() / ".claude",
+    Path.home() / ".cursor",
+    Path.home() / ".config" / "github-copilot",
+]
+```
+
+These directories are managed by their respective AI assistants. Myelin8 can read and index them for search. It cannot compress, encrypt, or delete files inside them. This is enforced in `engine.py` via `_is_protected()` — the guard runs before every tier transition.

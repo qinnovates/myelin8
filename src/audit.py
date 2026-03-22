@@ -1,7 +1,7 @@
 """
-Minimal audit logger for Engram operations.
+Minimal audit logger for Myelin8 operations.
 
-Disabled by default. Engram is a compression tool first — logging is
+Disabled by default. Myelin8 is a compression tool first — logging is
 opt-in for users who need SIEM-grade audit trails.
 
 Logs: timestamp, operation, tier, short artifact hash, outcome.
@@ -108,7 +108,7 @@ class AuditLogger:
     """Append-only audit logger with PII/secret detection.
 
     Supports two output modes:
-      1. Plaintext local log (audit.log, 0600) — encrypted at rest via engram lock
+      1. Plaintext local log (audit.log, 0600) — encrypted at rest via myelin8 lock
       2. PQ-encrypted syslog (audit.encf.log) — each entry individually encrypted
          via the sidecar for secure SIEM forwarding
     """
@@ -178,7 +178,7 @@ class AuditLogger:
             entry_bytes = json.dumps(entry, separators=(",", ":")).encode("utf-8")
 
             # Write to temp file, encrypt via sidecar, read back
-            fd, tmp_plain = tempfile.mkstemp(prefix="engram-syslog-", suffix=".json")
+            fd, tmp_plain = tempfile.mkstemp(prefix="myelin8-syslog-", suffix=".json")
             tmp_enc = tmp_plain + ".encf"
             try:
                 os.write(fd, entry_bytes)
@@ -207,7 +207,7 @@ class AuditLogger:
             # Emit a single warning on first failure so misconfiguration is visible
             if not self._syslog_error_reported:
                 import sys
-                print(f"engram: syslog encryption failed: {exc}", file=sys.stderr)
+                print(f"myelin8: syslog encryption failed: {exc}", file=sys.stderr)
                 self._syslog_error_reported = True
 
     def _ts(self) -> str:

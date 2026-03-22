@@ -1,4 +1,4 @@
-# Engram v2 Architecture — Brain-Informed Real-Time AI Memory
+# Myelin8 v2 Architecture — Brain-Informed Real-Time AI Memory
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@
   - [5. Reconsolidation (Update on Access)](#5-reconsolidation-update-on-access)
 - [Missing Sections (Identified by Quorum)](#missing-sections-identified-by-quorum)
   - [Concurrent Access](#concurrent-access)
-  - [Why Engram Remains Valuable When Context Windows Grow](#why-engram-remains-valuable-when-context-windows-grow)
+  - [Why Myelin8 Remains Valuable When Context Windows Grow](#why-myelin8-remains-valuable-when-context-windows-grow)
 - [Implementation Phases](#implementation-phases)
   - [Phase 1 (Build Now)](#phase-1-build-now)
   - [Phase 2 (After Phase 1 Deployed + Measured)](#phase-2-after-phase-1-deployed-measured)
@@ -28,7 +28,7 @@
 
 ## The Problem With v1
 
-Engram v1 models the brain's storage tiers well. It models retrieval poorly.
+Myelin8 v1 models the brain's storage tiers well. It models retrieval poorly.
 
 When you remember something, your brain doesn't decompress a file. It reconstructs from cues — the gist arrives instantly, details fill in on demand, and related memories surface automatically. v1 makes Claude do the file system version: search → decompress whole artifact → read. All-or-nothing.
 
@@ -43,7 +43,7 @@ Three real problems agents hit with v1:
 
 The hippocampus doesn't store memories. It stores pointers — pattern-separated index codes that reconstruct the original experience from fragments across the neocortex (Teyler & DiScenna 1986).
 
-| Brain Process | Engram v2 |
+| Brain Process | Myelin8 v2 |
 |---|---|
 | Hippocampal pattern match | Semantic search + HNSW |
 | Pattern completion (gist first) | Verified summary → selective section recall |
@@ -51,10 +51,10 @@ The hippocampus doesn't store memories. It stores pointers — pattern-separated
 | Priming | Session-topic analysis pre-warms search index |
 | Reconsolidation | Keyword update on access (deferred — needs bounds) |
 
-These are **design analogies** that inform architecture decisions. They are not algorithmic equivalences. The brain reconstructs from noisy distributed traces via attractor dynamics. Engram decompresses structured data from deterministic storage. The functional outcome (partial cue → useful result) is shared. The mechanism is completely different.
+These are **design analogies** that inform architecture decisions. They are not algorithmic equivalences. The brain reconstructs from noisy distributed traces via attractor dynamics. Myelin8 decompresses structured data from deterministic storage. The functional outcome (partial cue → useful result) is shared. The mechanism is completely different.
 
-What the brain does that Engram v2 still doesn't model:
-- **Interference** — competing memories actively degrade each other. Engram treats artifacts as independent.
+What the brain does that Myelin8 v2 still doesn't model:
+- **Interference** — competing memories actively degrade each other. Myelin8 treats artifacts as independent.
 - **Schema extraction** — sleep consolidation abstracts patterns over time, not just compresses data.
 - **State-dependent retrieval** — emotional and environmental context modulates recall strength.
 - **Prospective memory** — goal-directed retrieval triggered by environmental cues.
@@ -86,8 +86,8 @@ Claude trusts the summary. No decompression needed for most recall operations. P
 
 **Implementation:**
 - [ ] Add summary hash to `ArtifactSummary` dataclass in `context.py`
-- [ ] On `engram scan`: hash each summary, add as Merkle leaf via sidecar
-- [ ] On `engram recall` / `engram search`: return Merkle proof dict alongside summary
+- [ ] On `myelin8 scan`: hash each summary, add as Merkle leaf via sidecar
+- [ ] On `myelin8 recall` / `myelin8 search`: return Merkle proof dict alongside summary
 - [ ] Claude hook: verify proof before injecting recalled content into prompt
 
 ### 2. Selective Section Decompression
@@ -100,11 +100,11 @@ Claude trusts the summary. No decompression needed for most recall operations. P
 
 ```bash
 # v1: all or nothing
-engram recall ~/.claude/sessions/auth-refactor.jsonl  # returns 50KB
+myelin8 recall ~/.claude/sessions/auth-refactor.jsonl  # returns 50KB
 
 # v2: selective
-engram recall ~/.claude/sessions/auth-refactor.jsonl --section decisions  # returns 2KB
-engram recall ~/.claude/sessions/auth-refactor.jsonl --section code       # returns 5KB
+myelin8 recall ~/.claude/sessions/auth-refactor.jsonl --section decisions  # returns 2KB
+myelin8 recall ~/.claude/sessions/auth-refactor.jsonl --section code       # returns 5KB
 ```
 
 **Why not frame-per-section zstd:**
@@ -117,7 +117,7 @@ Simple post-decompression section splitting gets 80% of the value with 10% of th
 
 **Section identification:**
 ```python
-# Standard section headers in Engram artifacts
+# Standard section headers in Myelin8 artifacts
 SECTION_PATTERNS = {
     "context": r"^##?\s*(Context|Background)",
     "decisions": r"^##?\s*(Decision|Outcome|Conclusion)",
@@ -128,7 +128,7 @@ SECTION_PATTERNS = {
 ```
 
 **Implementation:**
-- [ ] Add `--section` flag to `engram recall` CLI
+- [ ] Add `--section` flag to `myelin8 recall` CLI
 - [ ] Add `section_extract(content: str, section: str) -> str` utility
 - [ ] Return Merkle proof for the full artifact (section is a substring, artifact is verified)
 
@@ -144,7 +144,7 @@ SECTION_PATTERNS = {
 When artifacts are recalled in the same session, record an edge. When artifacts share 3+ keywords, record an edge. Return top-3 related summaries with every recall.
 
 ```python
-result = engram.recall("auth refactor")
+result = myelin8.recall("auth refactor")
 # Returns:
 #   .content = the recalled section
 #   .related = [
@@ -173,8 +173,8 @@ CREATE INDEX idx_source ON edges(source_hash);
 
 **Implementation:**
 - [ ] Create `activation.py` with SQLite-backed edge store
-- [ ] Record co-occurrence edges on `engram recall`
-- [ ] Record keyword overlap edges on `engram scan`
+- [ ] Record co-occurrence edges on `myelin8 recall`
+- [ ] Record keyword overlap edges on `myelin8 scan`
 - [ ] Return top-3 related summaries in recall response
 - [ ] Prune edges older than 90 days or below weight threshold
 
@@ -210,22 +210,22 @@ The concept (re-indexing recalled artifacts with current context so they're easi
 
 ### Concurrent Access
 
-Two Claude Code sessions (or subagents) running simultaneously is common. Both hit Engram's metadata registry, semantic index, and activation graph.
+Two Claude Code sessions (or subagents) running simultaneously is common. Both hit Myelin8's metadata registry, semantic index, and activation graph.
 
-**Current v1 state:** `atomic_write_text()` prevents file corruption on write. But no file locking means two concurrent `engram run` operations can produce inconsistent state.
+**Current v1 state:** `atomic_write_text()` prevents file corruption on write. But no file locking means two concurrent `myelin8 run` operations can produce inconsistent state.
 
 **v2 requirement:** SQLite for the activation graph solves concurrent reads. For writes: either file-level locking (fcntl on Unix) or migrate the metadata registry to SQLite as well. This is a prerequisite for the activation graph, not an afterthought.
 
-### Why Engram Remains Valuable When Context Windows Grow
+### Why Myelin8 Remains Valuable When Context Windows Grow
 
 Context windows will hit 10M tokens. That makes raw capacity less scarce. It does NOT solve:
 
 1. **Finding the right context.** 10M tokens of everything is worse than 32K tokens of the right thing. Semantic search, keyword index, and activation graph are more valuable when the haystack is bigger.
-2. **Cost.** Loading 40MB of text into every prompt is expensive. Engram's tiered compression reduces what needs to be loaded. Even at 10M tokens, you don't want to pay for 10M on every API call.
+2. **Cost.** Loading 40MB of text into every prompt is expensive. Myelin8's tiered compression reduces what needs to be loaded. Even at 10M tokens, you don't want to pay for 10M on every API call.
 3. **Integrity.** A 10M context window doesn't tell you if the content is real. Merkle verification does. This becomes MORE important as context gets bigger — more data means more surface area for hallucination.
-4. **Privacy.** A bigger window means more sensitive data loaded per prompt. Engram's tier-gated encryption ensures only relevant, authorized content enters the context.
+4. **Privacy.** A bigger window means more sensitive data loaded per prompt. Myelin8's tier-gated encryption ensures only relevant, authorized content enters the context.
 
-Engram's value shifts from "fit context into a small window" to "find, verify, and secure context within a large window." The compression becomes less important. The search, integrity, and privacy become more important.
+Myelin8's value shifts from "fit context into a small window" to "find, verify, and secure context within a large window." The compression becomes less important. The search, integrity, and privacy become more important.
 
 ---
 
@@ -233,7 +233,7 @@ Engram's value shifts from "fit context into a small window" to "find, verify, a
 
 ### Phase 1 (Build Now)
 - [ ] Merkle-verified summaries (summary leaf + proof in recall response)
-- [ ] Selective section decompression (`engram recall --section decisions`)
+- [ ] Selective section decompression (`myelin8 recall --section decisions`)
 - [ ] Co-occurrence edge logging in SQLite
 - [ ] Related artifacts returned with recall (top-3)
 - [ ] Concurrent access: file locking for metadata writes

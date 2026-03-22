@@ -276,7 +276,7 @@ def encrypt_dek_with_pubkey(dek: bytes, pubkey: str) -> bytes:
     from .vault import VaultClient
 
     # Write DEK to a restricted temp file
-    fd, dek_path = _tf.mkstemp(prefix="engram-dek-", suffix=".bin")
+    fd, dek_path = _tf.mkstemp(prefix="myelin8-dek-", suffix=".bin")
     enc_path = dek_path + ".encf"
     try:
         os.write(fd, dek)
@@ -318,7 +318,7 @@ def decrypt_dek_with_privkey(encrypted_dek: bytes, tier: str) -> bytes:
     import tempfile as _tf
     from .vault import VaultClient
 
-    fd, enc_path = _tf.mkstemp(prefix="engram-edek-", suffix=".encf")
+    fd, enc_path = _tf.mkstemp(prefix="myelin8-edek-", suffix=".encf")
     dec_path = enc_path + ".dec"
     try:
         os.write(fd, encrypted_dek)
@@ -556,7 +556,7 @@ class EnvelopeEncryptor:
 
     @classmethod
     def setup_tier_with_keychain(
-        cls, tier: str, service: str = "engram"
+        cls, tier: str, service: str = "myelin8"
     ) -> tuple[str, str]:
         """
         Full setup: generate keypair via sidecar, store in OS credential vault.

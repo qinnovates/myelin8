@@ -7,7 +7,7 @@ and any custom paths the user configures.
 This module knows WHERE to look. The engine decides WHAT to do.
 
 IMPORTANT: AI assistant directories (e.g. ~/.claude/, ~/.cursor/) are
-READ-ONLY indexing targets. Engram indexes and searches these files but
+READ-ONLY indexing targets. Myelin8 indexes and searches these files but
 must NEVER modify, compress, encrypt, or delete originals inside them.
 The engine enforces this via PROTECTED_PATHS in engine.py.
 """

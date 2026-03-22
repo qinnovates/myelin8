@@ -23,7 +23,7 @@ const MAGIC: &[u8; 4] = b"ENCF";
 const VERSION: u16 = 2;
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
-const HKDF_INFO: &[u8] = b"engram-vault-v2-nist";
+const HKDF_INFO: &[u8] = b"myelin8-vault-v2-nist";
 const GCM_TAG_LEN: usize = 16;
 
 // ML-KEM-768 key types

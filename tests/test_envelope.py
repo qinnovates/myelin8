@@ -131,14 +131,14 @@ class TestEnvelopeEncryptorIntegration:
     def age_keypair(self) -> tuple[str, str]:
         """Generate a real keypair for testing via sidecar."""
         import shutil
-        vault_bin = shutil.which("engram-vault")
+        vault_bin = shutil.which("myelin8-vault")
         if not vault_bin:
-            pytest.skip("engram-vault sidecar not installed")
+            pytest.skip("myelin8-vault sidecar not installed")
         try:
             pubkey = EnvelopeEncryptor.generate_tier_keypair("test")
         except Exception:
             pytest.skip("Keypair generation failed (may already exist)")
-        return pubkey, "keychain:engram:test-key"
+        return pubkey, "keychain:myelin8:test-key"
 
     @pytest.fixture
     def sample_artifact(self, tmp_path: Path) -> Path:

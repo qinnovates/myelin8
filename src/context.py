@@ -138,7 +138,7 @@ class SemanticIndex:
 
         # HNSW + LSH indexed search (optional — gracefully degrades to brute-force)
         self._hnsw_index = None
-        self._lsh_index = None
+        # LSH index removed (redundant with HNSW)
         self._index_dir = index_dir
         try:
             from .vector_index import HNSWIndex
@@ -146,15 +146,8 @@ class SemanticIndex:
             self._hnsw_index.load(index_dir)
         except Exception:
             pass
-        try:
-            from .lookup_tables import LSHIndex
-            lsh_path = index_dir / "lsh-tables.npz"
-            if lsh_path.exists():
-                self._lsh_index = LSHIndex.load(str(lsh_path))
-            else:
-                self._lsh_index = LSHIndex(dim=384)
-        except Exception:
-            pass
+        # LSH removed — HNSW provides better ANN; brute-force cosine
+        # is fast enough under 50K artifacts. See docs/WHY.md.
 
     # Known fields — filter out unknown keys to prevent injection/crash
     _KNOWN_FIELDS = {
@@ -221,11 +214,7 @@ class SemanticIndex:
                 self._hnsw_index.save(self._index_dir)
             except Exception:
                 pass
-        if self._lsh_index is not None:
-            try:
-                self._lsh_index.save(str(self._index_dir / "lsh-tables.npz"))
-            except Exception:
-                pass
+        # LSH save removed
 
     def index_artifact(self, path: Path, content: str, meta: ArtifactMeta) -> ArtifactSummary:
         """
@@ -269,11 +258,7 @@ class SemanticIndex:
                     self._hnsw_index.add(key, embedding, meta.tier)
                 except Exception:
                     pass
-            if self._lsh_index is not None:
-                try:
-                    self._lsh_index.add(key, embedding)
-                except Exception:
-                    pass
+            # LSH add removed (redundant with HNSW)
 
         return entry
 
@@ -379,22 +364,6 @@ class SemanticIndex:
                     if hnsw_results:
                         mapped = []
                         for path, score in hnsw_results:
-                            if path in self._entries:
-                                entry = copy.copy(self._entries[path])
-                                entry.relevance_score = score
-                                mapped.append(entry)
-                        if mapped:
-                            return mapped
-
-            # Try LSH fallback (approximate, O(1) per table)
-            if self._lsh_index is not None and any(self._lsh_index.tables):
-                from .embeddings import _encode_text
-                query_vec = _encode_text(query)
-                if query_vec is not None:
-                    lsh_results = self._lsh_index.search(query_vec, top_k=max_results)
-                    if lsh_results:
-                        mapped = []
-                        for path, score in lsh_results:
                             if path in self._entries:
                                 entry = copy.copy(self._entries[path])
                                 entry.relevance_score = score
@@ -669,7 +638,7 @@ class ContextBuilder:
             tier_note = (
                 f"\n**Archived memories:** {cold_count} cold, {frozen_count} frozen. "
                 f"These are indexed above (searchable by keyword) but compressed on disk. "
-                f"To access full content, use `engram recall <path>`. "
+                f"To access full content, use `myelin8 recall <path>`. "
                 f"Cold recall takes ~500ms. Frozen recall takes ~5-10s. "
                 f"If encryption is enabled, Touch ID or vault access may be required.\n"
             )
@@ -678,7 +647,7 @@ class ContextBuilder:
             f"\n---\n"
             f"Memory: {self.budget.utilization_pct}% of context budget used "
             f"(~{self.budget.remaining_tokens_approx:,} tokens remaining). "
-            f"Use `engram recall <path>` for full content."
+            f"Use `myelin8 recall <path>` for full content."
             f"{tier_note}\n"
         )
         self.budget.consume(footer)
