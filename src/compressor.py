@@ -21,7 +21,7 @@ from typing import Optional
 
 import zstandard as zstd
 
-from .config import WARM_COMPRESSION_LEVEL, COLD_COMPRESSION_LEVEL, COMPRESSED_EXT
+from .config import WARM_COMPRESSION_LEVEL, COLD_COMPRESSION_LEVEL, COMPRESSED_EXT, validate_io_path
 
 
 class CompressionResult:
@@ -79,13 +79,13 @@ def compress_file(
     Returns:
         CompressionResult with sizes and ratio.
     """
-    input_path = Path(input_path)
+    input_path = validate_io_path(input_path, operation="compress read")
     if not input_path.exists():
         raise FileNotFoundError(f"Source file not found: {input_path}")
 
     if output_path is None:
         output_path = input_path.with_suffix(input_path.suffix + COMPRESSED_EXT)
-    output_path = Path(output_path)
+    output_path = validate_io_path(output_path, operation="compress write")
 
     original_size = input_path.stat().st_size
     compressor = zstd.ZstdCompressor(level=level)

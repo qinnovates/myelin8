@@ -27,6 +27,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from src.config import validate_io_path
+
 try:
     import numpy as np
     _HAS_NUMPY = True
@@ -227,7 +229,7 @@ class LSHIndex:
         if path is None:
             path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "lsh-tables.npz")
 
-        save_path = Path(path)
+        save_path = validate_io_path(path, operation="save LSH index")
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Flatten bucket contents into parallel arrays
@@ -270,7 +272,8 @@ class LSHIndex:
         if path is None:
             path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "lsh-tables.npz")
 
-        data = np.load(path, allow_pickle=False)  # SECURITY: never allow pickle (CWE-502)
+        validated_path = validate_io_path(path, operation="load LSH index")
+        data = np.load(str(validated_path), allow_pickle=False)  # SECURITY: never allow pickle (CWE-502)
         config = data["config"]
         dim, n_hyperplanes, n_tables, seed = int(config[0]), int(config[1]), int(config[2]), int(config[3])
 
@@ -480,7 +483,7 @@ class PQCodebook:
         if path is None:
             path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "pq-codebook.npz")
 
-        save_path = Path(path)
+        save_path = validate_io_path(path, operation="save PQ codebook")
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         np.savez(
@@ -503,7 +506,8 @@ class PQCodebook:
         if path is None:
             path = os.path.join(os.path.expanduser("~"), ".myelin8", "index", "pq-codebook.npz")
 
-        data = np.load(path, allow_pickle=False)  # SECURITY: CWE-502
+        validated_path = validate_io_path(path, operation="load PQ codebook")
+        data = np.load(str(validated_path), allow_pickle=False)  # SECURITY: CWE-502
         config = data["config"]
         dim, m, k = int(config[0]), int(config[1]), int(config[2])
 

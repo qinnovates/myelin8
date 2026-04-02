@@ -70,6 +70,37 @@ def _is_path_within_allowed_roots(p: Path) -> bool:
     return False
 
 
+def validate_io_path(path: str | Path, operation: str = "access") -> Path:
+    """Canonicalize and boundary-check a file path before I/O.
+
+    Resolves symlinks, rejects traversal sequences, and verifies the
+    resolved path is within the user's home or temp directories.
+
+    Args:
+        path: Raw path (may contain ~, .., symlinks).
+        operation: Description for error message (e.g., "read", "write").
+
+    Returns:
+        Resolved, validated Path.
+
+    Raises:
+        ConfigValidationError: If path escapes allowed roots or targets
+            a sensitive directory.
+    """
+    resolved = Path(os.path.expanduser(str(path))).resolve()
+    if not _is_path_within_allowed_roots(resolved):
+        raise ConfigValidationError(
+            f"Path escapes allowed roots ({operation}): {path} "
+            f"resolves to {resolved}"
+        )
+    if _is_sensitive_path(resolved):
+        raise ConfigValidationError(
+            f"Path targets sensitive directory ({operation}): {path} "
+            f"resolves to {resolved}"
+        )
+    return resolved
+
+
 def _is_sensitive_path(p: Path) -> bool:
     """Check if a path resolves to a known sensitive directory."""
     resolved = p.resolve()
