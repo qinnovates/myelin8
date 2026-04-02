@@ -1,0 +1,56 @@
+# User Preferences — Layer 4 Configuration
+# These are DURABLE preferences established through explicit user statements.
+# This file is the source of truth for user-level config overrides.
+#
+# Write policy:
+#   - Explicit statements → write immediately, confidence 1.0
+#   - Inferred patterns (3+ sessions) → write with confidence ≤ 0.8, requires audit entry
+#   - Single-session observations → do NOT write here; use session working memory
+#
+# Security note: No PII. No secrets. No credentials. Preferences only.
+
+layer: user
+user_id: "example-user"
+last_updated: "2026-04-01"
+
+# ────────────────────────────────────────────────────────────────
+# Response Style Preferences
+# ────────────────────────────────────────────────────────────────
+response:
+  tone: direct                    # No hedging, no softening, just the answer
+  output_length: concise          # Lead with the answer; details on request
+  output_format: markdown         # Always markdown, never plain prose for structured content
+  tables: avoid                   # User prefers bullets over tables for lists
+  code_comments: minimal          # Self-documenting code preferred over inline comments
+  verbosity: medium               # Overrides system default; medium unless task needs more
+
+# ────────────────────────────────────────────────────────────────
+# Technical Preferences
+# ────────────────────────────────────────────────────────────────
+technical:
+  confidence_scores: true         # Always append confidence scores on uncertain claims
+  show_reasoning: when_nontrivial # Show reasoning chain for complex decisions, not for trivial ones
+  error_handling_style: explicit  # Typed errors, no empty catch blocks, no swallowed exceptions
+  async_style: async_await        # Never .then() chains; always async/await
+
+# ────────────────────────────────────────────────────────────────
+# Long-term Memory / Context
+# ────────────────────────────────────────────────────────────────
+long_term_memory:
+  interests:
+    - "neurosecurity"
+    - "brain-computer interfaces"
+    - "cybersecurity architecture"
+    - "iOS/Swift development"
+    - "AI safety and alignment"
+  recurring_goals:
+    - "build production-grade security tools"
+    - "apply SIEM architecture principles to AI systems"
+  background:
+    - "decade of SIEM architecture at petabyte scale"
+    - "iOS developer — Swift, SwiftUI, CoreML"
+    - "security researcher"
+  exclusions:
+    - "avoid suggesting PHP for new projects"
+    - "avoid jQuery for new frontend work"
+    - "do not suggest .then() promise chains — always async/await"

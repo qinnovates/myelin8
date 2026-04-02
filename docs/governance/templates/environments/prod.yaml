@@ -1,0 +1,63 @@
+# Production Environment — Layer 3 Configuration
+# Use for: live production workloads
+# Prioritizes: reliability, cost efficiency, privacy, security
+# Change process: stage validation required before prod deploy
+
+layer: environment
+name: prod
+version: "1.0"
+
+model:
+  primary: "claude-opus-4-6"
+  fallback: "claude-sonnet-4-6"   # Automatic fallback on timeout or error
+  reason: "Prod uses the most capable model; correctness over cost"
+
+retrieval:
+  vector_index: "research-prod-index"
+  reranker: true                  # Reranker improves precision at acceptable latency cost
+  max_retrieved_facts: 5
+  min_confidence_threshold: 0.5   # Don't inject low-confidence facts in prod
+  max_retrieved_episodes: 3
+  similarity_threshold: 0.7
+  cache_ttl_seconds: 300          # Cache retrieval results for 5 minutes
+
+limits:
+  max_context_tokens: 100000
+  response_timeout_ms: 12000
+  max_tool_calls_per_turn: 15
+  rate_limit_rpm: 60              # Requests per minute per user
+
+observability:
+  prompt_logging: metadata_only   # Never log full prompts in prod — PII risk
+  log_context_assembly: false     # Too verbose and too sensitive for prod logging
+  log_memory_retrievals: false    # Retrieval patterns can leak user behavior
+  log_tool_calls: true            # Tool call logs are useful for security audit
+  trace_id_injection: true        # Trace IDs for correlation without content
+  retention_days: 90
+  alert_on_safety_violation: true # Alert security team on immutability violations
+
+feature_flags:
+  experimental_retrieval: false
+  memory_write_dry_run: false
+  verbose_precedence_logging: false
+
+hooks:
+  post_tool_use_enforcement: true
+  semgrep_rules: "rules/semgrep-prod.yaml"
+  on_violation:
+    action: block_and_log
+    alert: true
+    severity_threshold_for_alert: medium   # medium+ violations fire alerts
+
+disaster_recovery:
+  fallback_to_no_retrieval: true   # If vector index is down, serve without retrieval
+  fallback_model: "claude-sonnet-4-6"
+  circuit_breaker:
+    enabled: true
+    error_threshold_percent: 20    # Open circuit if >20% of requests fail
+    recovery_timeout_seconds: 60
+
+compliance:
+  data_residency: "us"             # Restrict data processing to US regions
+  audit_log_required: true
+  audit_log_destination: "audit/prod/"

@@ -1,0 +1,46 @@
+# Development Environment — Layer 3 Configuration
+# Use for: local development, feature branches, debugging sessions
+# Inherits from: system layer + app layer
+# Key differences from prod: cheaper model, verbose logging, relaxed timeouts, liberal retrieval
+
+layer: environment
+name: dev
+version: "1.0"
+
+model:
+  primary: "claude-haiku-4-5-20251001"   # Cheap for iteration; swap to opus for complex tasks
+  fallback: "claude-sonnet-4-6"
+  reason: "Dev uses lighter model to reduce cost during rapid iteration"
+
+retrieval:
+  vector_index: "research-dev-index"
+  reranker: false               # Reranker adds latency; skip in dev
+  max_retrieved_facts: 10       # More liberal — helpful for debugging retrieval behavior
+  max_retrieved_episodes: 5
+  similarity_threshold: 0.6     # Lower threshold — surface more candidates for debugging
+
+limits:
+  max_context_tokens: 50000
+  response_timeout_ms: 30000    # Generous timeout for debugging
+  max_tool_calls_per_turn: 20   # Liberal — dev sessions often need many tool calls
+
+observability:
+  prompt_logging: full          # Full logging in dev — critical for debugging
+  log_context_assembly: true    # Log the full assembled context for debugging
+  log_memory_retrievals: true
+  log_tool_calls: true
+  trace_id_injection: true
+  retention_days: 7             # Short retention in dev
+
+feature_flags:
+  experimental_retrieval: true       # Enable experimental retrieval features for testing
+  memory_write_dry_run: false        # Set to true to preview writes without committing
+  verbose_precedence_logging: true   # Log every field merge decision for debugging
+
+hooks:
+  post_tool_use_enforcement: true    # Hooks run in dev — don't skip in dev
+  semgrep_rules: "rules/semgrep-dev.yaml"  # Dev rules may include extra debug checks
+  note: >
+    Hooks must run in dev. The most common mistake is disabling hooks in dev
+    "for convenience" and then being surprised when violations ship.
+    Dev is where you catch violations cheaply. Prod is where they cost you.

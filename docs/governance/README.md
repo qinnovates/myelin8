@@ -99,16 +99,46 @@ Layers 2 and 3 are defined in schemas but not loaded at runtime. They exist for 
 
 ## Documents in This Directory
 
+### Core Architecture
 | File | What It Covers |
 |------|---------------|
 | [LAYERED-CONTEXT.md](LAYERED-CONTEXT.md) | Full 5-layer architecture specification |
 | [MEMORY-TYPES.md](MEMORY-TYPES.md) | Semantic facts, episodic events, session state, procedural memory |
 | [PRECEDENCE.md](PRECEDENCE.md) | Layer merge algorithm with worked examples |
+| [SIEM-ANALOGY.md](SIEM-ANALOGY.md) | Why SIEM layered config maps to AI context (Splunk conf hierarchy) |
+| [CONFIG-MAPPING.md](CONFIG-MAPPING.md) | SIEM → AI config field mapping (the Rosetta Stone) |
+
+### Operations & Best Practices
+| File | What It Covers |
+|------|---------------|
 | [ANTI-PATTERNS.md](ANTI-PATTERNS.md) | What NOT to do (god memory files, silent writes, no TTL, etc.) |
+| [BEST-PRACTICES.md](BEST-PRACTICES.md) | Operational checklist for production deployments |
+| [MAINTENANCE.md](MAINTENANCE.md) | Day-2 operations: decay, compaction, rotation, cleanup |
+| [CLAUDE-MD-GUIDE.md](CLAUDE-MD-GUIDE.md) | How to write effective CLAUDE.md files (advisory vs enforced) |
+
+### Extension Points
+| File | What It Covers |
+|------|---------------|
+| [STANZA-DESIGN.md](STANZA-DESIGN.md) | How to design config stanzas for custom layers |
+| [VERBOSE-PERMISSIONS.md](VERBOSE-PERMISSIONS.md) | Fine-grained tool permission fingerprinting |
+| [AB-TESTING.md](AB-TESTING.md) | A/B testing context adherence (multi-tenant) |
+
+### Schemas
+| File | What It Covers |
+|------|---------------|
 | [schemas/fact.schema.yaml](schemas/fact.schema.yaml) | JSON Schema for semantic memory facts |
 | [schemas/episode.schema.yaml](schemas/episode.schema.yaml) | JSON Schema for episodic memory events |
 | [schemas/memory-write-policy.yaml](schemas/memory-write-policy.yaml) | Write rules: auto-write, pending, blocked |
 | [schemas/artifact-mapping.yaml](schemas/artifact-mapping.yaml) | Parquet column ↔ SIEMPLE-AI field mapping |
+
+### Reference Implementation
+| Directory | What It Contains |
+|-----------|-----------------|
+| [templates/](templates/) | Layer config templates (system, apps, environments, users, runtime) |
+| [claude-code/](claude-code/) | Claude Code integration: CLAUDE.md, rules, hooks, agents, commands |
+| [examples/](examples/) | Worked examples: context bundles, memory lifecycle, precedence |
+| [audit/](audit/) | Audit log format reference (config changes, memory writes) |
+| [SIEMPLE-AI-README.md](SIEMPLE-AI-README.md) | Original SIEMPLE-AI project README |
 
 ## Origin
 

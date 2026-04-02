@@ -1,0 +1,79 @@
+{
+  "_comment": [
+    "Claude Code settings.json — reference wiring for SIEMPLE-AI hooks.",
+    "Place this file at: <project-root>/.claude/settings.json",
+    "Or copy to: ~/.claude/settings.json for global activation.",
+    "Docs: https://docs.anthropic.com/en/docs/claude-code/settings"
+  ],
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "_comment": "Trigger security scan after any file write or edit.",
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(dirname \"$0\")/claude-code/hooks/post-tool-use.sh\"",
+            "_note": "Claude Code passes the written file path via the CLAUDE_FILE_PATH env var. The hook reads this to determine what to scan."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "_comment": "Verbose permission fingerprint before any Bash execution.",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(dirname \"$0\")/claude-code/hooks/verbose-permissions-check.sh\"",
+            "_note": "Hook reads the proposed command from stdin JSON (.tool_input.command) and emits a structured behavioral fingerprint before execution. See claude-code/rules/verbose-permissions.md."
+          }
+        ]
+      }
+    ]
+  },
+
+  "env": {
+    "SEMGREP_RULES_PATH": "claude-code/hooks/semgrep.yaml",
+    "BANDIT_ENABLED": "false",
+    "HOOK_STRICT": "false",
+    "_note": "Set HOOK_STRICT=true to block on MEDIUM semgrep findings (default blocks HIGH+CRITICAL only)."
+  },
+
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+
+  "_wiring_notes": {
+    "PostToolUse_flow": [
+      "1. Claude Code calls Write/Edit/NotebookEdit tool",
+      "2. Tool writes file to disk",
+      "3. PostToolUse hook fires with file path in environment",
+      "4. post-tool-use.sh checks SCANNABLE_EXTENSIONS, skips non-code files",
+      "5. semgrep runs against the written file using claude-code/hooks/semgrep.yaml",
+      "6. If HIGH or CRITICAL findings: hook exits non-zero, Claude Code surfaces violation",
+      "7. Model must remediate before output is accepted"
+    ],
+    "PreToolUse_flow": [
+      "1. Claude Code is about to call Bash tool",
+      "2. PreToolUse hook fires with proposed command in stdin JSON",
+      "3. verbose-permissions-check.sh decomposes command into behavioral fingerprint",
+      "4. Fingerprint shown to user (Service, Program, Directory, Network, Privileges, Signatures, Risk Level)",
+      "5. User approves or denies before command executes",
+      "6. Hook exits 0 = proceed, non-zero = block"
+    ],
+    "semgrep_rules_covered": [
+      "subprocess shell=True (CWE-78)",
+      "os.system / os.popen (CWE-78)",
+      "hardcoded API keys and secrets (CWE-798)",
+      "SQL string concatenation (CWE-89)",
+      "eval() with dynamic input (CWE-95)",
+      "new Function() with dynamic input (CWE-95)",
+      "path traversal via open() (CWE-22)",
+      "bare except / empty catch (CWE-390)"
+    ]
+  }
+}

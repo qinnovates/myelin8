@@ -1,0 +1,157 @@
+# Tool Policies Template
+# Layer 1 — Base system tool configuration.
+# Defines which tools are available, their default behavior, and which fields
+# downstream layers are permitted to override.
+
+layer: system
+component: tools
+
+# ────────────────────────────────────────────────────────────────
+# Tool Registry
+# Each tool entry defines: availability, defaults, and override permissions.
+# App layer (Layer 2) can restrict but not expand permissions.
+# User layer (Layer 4) can adjust behavior within app-allowed bounds.
+# Session layer (Layer 5) can add temporary restrictions only.
+# ────────────────────────────────────────────────────────────────
+
+tools:
+
+  web_search:
+    enabled: true
+    overridable: true
+    defaults:
+      when_to_use: "when the user asks for current information or external facts"
+      domain_restrictions: null      # null = unrestricted; app layer can add allowlist
+      result_trust_level: untrusted  # overridable: false
+    app_layer_can:
+      - disable_tool
+      - add_domain_allowlist
+      - add_domain_blocklist
+    user_layer_can:
+      - add_preferred_domains
+    session_layer_can:
+      - disable_for_session
+
+  code_execution:
+    enabled: true
+    overridable_availability: true
+    overridable_sandbox: false       # Sandbox mode is non-negotiable
+    defaults:
+      mode: sandbox
+      languages_allowed: [python, javascript, bash, sql]
+      timeout_seconds: 30
+      network_access: false          # Sandboxed code cannot make network calls
+      filesystem_access: project_root_only
+    app_layer_can:
+      - restrict_languages
+      - reduce_timeout
+      - disable_tool
+    user_layer_can: []               # Users cannot change execution policy
+    note: "sandbox: false is never allowed regardless of layer."
+
+  file_read:
+    enabled: true
+    overridable: true
+    defaults:
+      path_restrictions: project_root
+      max_file_size_kb: 1024
+      binary_files: ask_before_reading
+    app_layer_can:
+      - add_path_restrictions
+      - reduce_max_file_size
+    user_layer_can:
+      - set_preferred_encoding
+
+  file_write:
+    enabled: true
+    overridable: true
+    defaults:
+      require_confirmation: true
+      path_restrictions: project_root
+      forbidden_write_paths:
+        - "~/.ssh/"
+        - "~/.aws/"
+        - "/etc/"
+        - "/usr/"
+        - "/System/"
+    app_layer_can:
+      - make_confirmation_required_for_all_writes
+      - add_path_restrictions
+    user_layer_can:
+      - set_default_confirmation_behavior  # But cannot expand write permissions
+    note: >
+      Writes outside project_root always require explicit confirmation regardless
+      of user preferences. This cannot be overridden.
+
+  shell_command:
+    enabled: true
+    overridable: true
+    defaults:
+      require_confirmation_for_destructive: true
+      shell_true_blocked: true       # overridable: false
+      blocked_commands:
+        - "rm -rf /"
+        - "dd if=.*of=/dev/"
+        - "mkfs"
+        - "diskutil erase"
+        - "nvram"
+        - "curl.*|.*sh"
+        - "wget.*|.*bash"
+    app_layer_can:
+      - add_allowed_command_patterns
+      - restrict_to_specific_commands
+    user_layer_can: []
+    note: "shell_true_blocked and blocked_commands cannot be overridden."
+
+  memory_write:
+    enabled: true
+    overridable: true
+    defaults:
+      require_audit_log: true        # overridable: false
+      explicit_preference_auto_write: true
+      inferred_preference_auto_write: false  # Requires confirmation
+      pii_write_blocked: true        # overridable: false
+    app_layer_can:
+      - disable_auto_write
+      - restrict_memory_types
+    user_layer_can:
+      - set_memory_write_confirmation_preference
+    note: "audit_log and pii_write_blocked cannot be overridden."
+
+  external_api:
+    enabled: true
+    overridable: true
+    defaults:
+      https_only: true               # overridable: false
+      require_confirmation_for_side_effects: true
+      side_effect_operations:
+        - "POST/PUT/DELETE/PATCH requests"
+        - "Any operation that creates, modifies, or deletes external resources"
+    app_layer_can:
+      - add_allowed_api_domains
+      - add_blocked_api_domains
+      - configure_per_domain_confirmation
+    user_layer_can:
+      - add_preferred_api_behaviors
+    note: "https_only cannot be overridden. External API calls over HTTP are never allowed."
+
+# ────────────────────────────────────────────────────────────────
+# Tool Override Governance
+# Summarizes what each layer can and cannot do.
+# ────────────────────────────────────────────────────────────────
+override_governance:
+  layer_2_app:
+    can: "Restrict tool availability, add domain/path restrictions, adjust defaults"
+    cannot: "Expand permissions beyond Layer 1, disable safety constraints"
+
+  layer_3_environment:
+    can: "Adjust timeouts, adjust retrieval budgets, toggle tools for dev vs prod"
+    cannot: "Expand permissions, disable safety constraints"
+
+  layer_4_user:
+    can: "Adjust confirmation preferences for overridable fields, add domain preferences"
+    cannot: "Expand permissions, disable safety, modify tool sandbox settings"
+
+  layer_5_session:
+    can: "Add temporary restrictions for the current task"
+    cannot: "Expand permissions (even temporarily), modify durable config"

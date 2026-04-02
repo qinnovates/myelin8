@@ -1,0 +1,146 @@
+{
+  "_comment": "Example of a fully resolved context bundle at inference time. This is what the context assembly pipeline produces before injecting into the model's context window.",
+  "_note": "In production, this would not exist as a file — it's constructed in-memory per request. This example is for documentation purposes.",
+
+  "request_id": "req_example_001",
+  "assembled_at": "2026-04-01T10:30:00Z",
+  "session_id": "sess_example_001",
+  "user_id": "example-user",
+
+  "resolved_config": {
+    "_comment": "Result of merging Layers 1-5. Each field annotated with source_layer.",
+    "persona.role": {
+      "value": "Research analyst and technical advisor",
+      "source_layer": "app",
+      "app": "research_copilot"
+    },
+    "response.verbosity": {
+      "value": "medium",
+      "source_layer": "user",
+      "note": "User Layer 4 overrides system Layer 1 default of 'medium' — both happen to be medium here"
+    },
+    "response.output_format": {
+      "value": "markdown",
+      "source_layer": "user"
+    },
+    "response.tone": {
+      "value": "direct",
+      "source_layer": "user"
+    },
+    "safety.pii_redaction": {
+      "value": true,
+      "source_layer": "system",
+      "immutable": true,
+      "override_attempts_blocked": 0
+    },
+    "tool_policy.code_execution.mode": {
+      "value": "sandbox",
+      "source_layer": "system",
+      "immutable": true
+    },
+    "model.primary": {
+      "value": "claude-opus-4-6",
+      "source_layer": "environment",
+      "environment": "prod"
+    },
+    "retrieval.max_retrieved_facts": {
+      "value": 5,
+      "source_layer": "environment"
+    },
+    "citations.verification_required": {
+      "value": true,
+      "source_layer": "app",
+      "app": "research_copilot"
+    },
+    "session.objective": {
+      "value": "Design and implement memory write policy schema",
+      "source_layer": "session",
+      "expires_with_session": true
+    }
+  },
+
+  "retrieved_semantic_facts": {
+    "_comment": "Top 5 facts retrieved by relevance to current turn embedding. NOT the full store.",
+    "retrieval_query": "memory write policy schema design YAML validation",
+    "facts": [
+      {
+        "id": "fact_siem_background",
+        "key": "professional_background.siem",
+        "value": "decade of SIEM architecture at petabyte scale",
+        "confidence": 1.0,
+        "relevance_score": 0.91
+      },
+      {
+        "id": "fact_current_focus",
+        "key": "current_project.primary",
+        "value": "AI context architecture using SIEM principles",
+        "confidence": 0.95,
+        "relevance_score": 0.88
+      },
+      {
+        "id": "fact_output_format",
+        "key": "output_format",
+        "value": "markdown",
+        "confidence": 1.0,
+        "relevance_score": 0.72
+      },
+      {
+        "id": "fact_confidence_scores",
+        "key": "show_confidence_scores",
+        "value": true,
+        "confidence": 1.0,
+        "relevance_score": 0.70
+      },
+      {
+        "id": "fact_tone_pref",
+        "key": "preferred_tone",
+        "value": "direct",
+        "confidence": 1.0,
+        "relevance_score": 0.68
+      }
+    ],
+    "facts_not_retrieved": "4 facts in store below relevance threshold — not injected"
+  },
+
+  "retrieved_episodes": {
+    "_comment": "Top 3 episodes by recency-weighted importance. NOT the full episode store.",
+    "episodes": [
+      {
+        "id": "ep_architecture_design_session",
+        "summary": "Designed five-layer AI context architecture. Confirmed SIEM analogy maps well. Key decisions: system layer safety fields are immutable, retrieval uses top-N not full injection, episodic memory needs compaction.",
+        "importance": 0.92,
+        "relevance_score": 0.89,
+        "age_days": 0
+      }
+    ]
+  },
+
+  "context_budget": {
+    "total_available_tokens": 100000,
+    "consumed": {
+      "system_layer_config": 1200,
+      "retrieved_facts": 420,
+      "retrieved_episodes": 310,
+      "session_state": 580,
+      "turn_history_last_10": 3200,
+      "current_turn": 180
+    },
+    "total_consumed": 5890,
+    "remaining": 94110,
+    "_note": "5.9% of context budget used for non-turn content. Remaining budget available for response."
+  },
+
+  "safety_flags": [],
+
+  "assembly_log": [
+    {"step": 1, "action": "load_system_layer", "status": "ok"},
+    {"step": 2, "action": "load_app_layer", "app": "research_copilot", "status": "ok"},
+    {"step": 3, "action": "load_environment_layer", "env": "prod", "status": "ok"},
+    {"step": 4, "action": "load_user_layer", "user_id": "example-user", "status": "ok"},
+    {"step": 5, "action": "load_session_layer", "session_id": "sess_example_001", "status": "ok"},
+    {"step": 6, "action": "retrieve_semantic_facts", "retrieved": 5, "filtered_out": 4, "status": "ok"},
+    {"step": 7, "action": "retrieve_episodes", "retrieved": 1, "below_threshold": 0, "status": "ok"},
+    {"step": 8, "action": "validate_immutability", "violations": 0, "status": "ok"},
+    {"step": 9, "action": "assemble_complete", "total_tokens": 5890, "status": "ok"}
+  ]
+}

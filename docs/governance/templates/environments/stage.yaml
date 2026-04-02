@@ -1,0 +1,46 @@
+# Staging Environment — Layer 3 Configuration
+# Use for: pre-production validation, integration testing, QA
+# Mirror of prod configuration with enhanced observability.
+# Changes must pass staging before going to prod.
+
+layer: environment
+name: stage
+version: "1.0"
+
+model:
+  primary: "claude-sonnet-4-6"    # Match prod capability, not prod cost
+  fallback: "claude-haiku-4-5-20251001"
+
+retrieval:
+  vector_index: "research-stage-index"
+  reranker: true                  # Match prod behavior
+  max_retrieved_facts: 5          # Match prod
+  max_retrieved_episodes: 3       # Match prod
+  similarity_threshold: 0.7       # Match prod
+
+limits:
+  max_context_tokens: 100000      # Match prod
+  response_timeout_ms: 15000      # Slightly more generous than prod for observability overhead
+  max_tool_calls_per_turn: 15
+
+observability:
+  prompt_logging: metadata_only   # Match prod privacy posture
+  log_context_assembly: true      # But log assembly for debugging — ok in stage
+  log_memory_retrievals: true
+  log_tool_calls: true
+  trace_id_injection: true
+  retention_days: 30
+
+feature_flags:
+  experimental_retrieval: false   # Stage tests prod-equivalent behavior
+  memory_write_dry_run: false
+  verbose_precedence_logging: false
+
+hooks:
+  post_tool_use_enforcement: true
+  semgrep_rules: "rules/semgrep-prod.yaml"   # Use prod rules in stage
+
+validation:
+  run_precedence_tests: true      # Validate config resolution on every deploy
+  run_hook_health_check: true     # Validate hooks are working before marking stage healthy
+  smoke_test_required: true       # Run smoke tests before traffic can be sent

@@ -1,0 +1,50 @@
+# User Profile — Layer 4 Metadata
+# Static identity and onboarding data. Not retrieved at every turn —
+# injected as part of the user layer during context assembly.
+# Sensitive fields are minimal; PII never stored here.
+
+layer: user
+user_id: "example-user"
+created_at: "2026-01-15T09:00:00Z"
+last_active: "2026-04-01T10:00:00Z"
+
+# ────────────────────────────────────────────────────────────────
+# Identity (non-PII)
+# ────────────────────────────────────────────────────────────────
+identity:
+  display_name: "Example User"
+  role: "Security Researcher / Developer"
+  expertise_level: expert
+  primary_domains:
+    - "Cybersecurity"
+    - "Systems Architecture"
+    - "iOS/Swift Development"
+    - "AI/ML Systems"
+
+# ────────────────────────────────────────────────────────────────
+# Communication Profile
+# ────────────────────────────────────────────────────────────────
+communication:
+  input_style: "terse and technical — fast informal typing signals speed, not lack of expertise"
+  expected_output_style: "match technical depth of the problem, not formality of input"
+  pushback_tolerance: high    # User wants direct disagreement, not softened corrections
+
+# ────────────────────────────────────────────────────────────────
+# App Memberships
+# ────────────────────────────────────────────────────────────────
+app_memberships:
+  - app: research_copilot
+    access_level: full
+    joined: "2026-01-15"
+  - app: soc_copilot
+    access_level: full
+    joined: "2026-01-15"
+
+# ────────────────────────────────────────────────────────────────
+# Memory Preferences
+# ────────────────────────────────────────────────────────────────
+memory:
+  auto_write_preferences: true
+  confirmation_required_for_inferred: true    # Want to review inferred writes before commit
+  episode_auto_generate: true
+  episode_min_importance: 0.6    # Only generate episodes for significant sessions

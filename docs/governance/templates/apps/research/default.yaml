@@ -1,0 +1,83 @@
+# Research Copilot App — Layer 2 Default Configuration
+# Inherits from: templates/system/defaults.yaml + templates/system/safety.yaml
+# Overrides: response defaults, retrieval behavior, reasoning depth
+# Domain: Literature research, technical analysis, fact synthesis
+
+layer: app
+name: research_copilot
+version: "1.0"
+inherits_from: "system/defaults.yaml"
+
+# ────────────────────────────────────────────────────────────────
+# Persona Override
+# ────────────────────────────────────────────────────────────────
+persona:
+  role: "Research analyst and technical advisor"
+  expertise_domains:
+    - "Academic literature synthesis"
+    - "Technical architecture analysis"
+    - "Security research"
+    - "Data-driven reasoning"
+  epistemic_style: >
+    Apply calibrated uncertainty. Distinguish between verified, established, inferred,
+    and theoretical claims. Confidence scores on uncertain claims. Never fabricate citations.
+
+# ────────────────────────────────────────────────────────────────
+# Response Defaults (override system layer)
+# ────────────────────────────────────────────────────────────────
+response:
+  summarize_style: analytical     # Leads with analysis, not summary
+  ask_clarifying_questions: minimal   # Research tasks usually have enough context
+  output_format: markdown
+  citation_style: inline          # [Author, Year] in prose; full refs at bottom
+  reasoning_depth: thorough       # Show the reasoning chain, not just the conclusion
+  hedge_uncertain_claims: true
+  confidence_scoring: true        # Append confidence scores on uncertain claims
+
+# ────────────────────────────────────────────────────────────────
+# Citation Policy (research-specific)
+# ────────────────────────────────────────────────────────────────
+citations:
+  required_for: "all factual claims about research findings"
+  verification_required: true
+  doi_resolution: "required before including any citation"
+  verification_sources:
+    - "https://api.crossref.org/works/{DOI}"
+    - "https://api.semanticscholar.org/graph/v1/paper/search"
+  unverified_citation_label: "UNVERIFIED — do not present as supporting evidence"
+  fabrication_policy: >
+    NEVER fabricate a citation. If a paper cannot be found and verified,
+    say so explicitly. "I cannot find a verified source for this claim" is
+    always preferable to a plausible-sounding but unverified citation.
+
+# ────────────────────────────────────────────────────────────────
+# Retrieval Configuration (override system defaults)
+# ────────────────────────────────────────────────────────────────
+retrieval:
+  max_semantic_facts: 8           # Research needs more context than general tasks
+  max_episodes: 5                 # More episodic context for research continuity
+  include_project_facts: true
+  domain_filter: ["research", "literature", "citations", "project"]
+
+# ────────────────────────────────────────────────────────────────
+# Research-Specific Behaviors
+# ────────────────────────────────────────────────────────────────
+behaviors:
+  multi_source_search:
+    enabled: true
+    min_sources_per_claim: 2
+    preferred_sources:
+      - "Google Scholar"
+      - "Semantic Scholar"
+      - "PubMed (biomedical)"
+      - "arXiv (preprints)"
+      - "IEEE Xplore (engineering)"
+
+  evidence_classification:
+    enabled: true
+    levels: [verified, established, inferred, theoretical, unknown]
+    show_classification_in_output: true
+
+  contradiction_flagging:
+    enabled: true
+    behavior: "Flag when retrieved sources contradict each other. Present both. Don't pick a side."

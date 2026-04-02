@@ -1,0 +1,261 @@
+rules:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # SHELL INJECTION
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: subprocess-shell-true
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+      - pattern: subprocess.$FUNC(..., shell=True)
+    message: >
+      [CRITICAL] subprocess called with shell=True. This passes the command
+      through /bin/sh and enables shell injection if any part of the command
+      is derived from user input. Use a list of arguments with shell=False
+      instead: subprocess.run(["cmd", "arg1", "arg2"], shell=False).
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      owasp: A03:2021 - Injection
+      category: security
+
+  - id: os-system-call
+    pattern: os.system(...)
+    message: >
+      [HIGH] os.system() executes commands through the shell and is
+      vulnerable to injection. Use subprocess.run() with a list argument
+      and shell=False.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      category: security
+
+  - id: os-popen-call
+    pattern: os.popen(...)
+    message: >
+      [HIGH] os.popen() executes commands through the shell. Use
+      subprocess.run() with capture_output=True and shell=False.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      category: security
+
+  - id: shell-exec-javascript
+    patterns:
+      - pattern: exec($CMD, ...)
+      - pattern: execSync($CMD, ...)
+      - pattern: spawn($CMD, { shell: true, ... })
+      - pattern: spawnSync($CMD, { shell: true, ... })
+    message: >
+      [HIGH] Shell execution with dynamic input detected. Use spawn() with
+      an argument array and no shell option, or validate/allowlist the
+      command before execution.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      category: security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # HARDCODED SECRETS & CREDENTIALS
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: hardcoded-api-key-openai
+    patterns:
+      - pattern: $VAR = "sk-..."
+    message: >
+      [CRITICAL] Hardcoded API key detected (matches OpenAI/Anthropic sk-
+      prefix pattern). Remove immediately. Use environment variables:
+      os.environ["API_KEY"] or a secrets manager.
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-798
+      owasp: A07:2021 - Identification and Authentication Failures
+      category: security
+
+  - id: hardcoded-secret-assignment
+    patterns:
+      - pattern: $KEY = "..."
+        metavariable-regex:
+          metavariable: $KEY
+          regex: (?i)(api_key|apikey|api_secret|secret_key|secretkey|auth_token|access_token|private_key|client_secret|password|passwd|pwd|token)
+        metavariable-regex:
+          metavariable: $PATTERN
+          regex: .{8,}
+    message: >
+      [HIGH] Hardcoded credential detected. The variable name suggests this
+      is sensitive material. Store in environment variables or a secrets
+      manager, never in source code.
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-798
+      category: security
+
+  - id: hardcoded-bearer-token
+    patterns:
+      - pattern: "Bearer ..."
+    message: >
+      [CRITICAL] Hardcoded Bearer token literal detected. Tokens must be
+      loaded at runtime from environment variables or a secrets manager.
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-798
+      category: security
+
+  - id: hardcoded-aws-key
+    patterns:
+      - pattern: $VAR = "AKIA..."
+    message: >
+      [CRITICAL] Hardcoded AWS Access Key ID detected (matches AKIA prefix).
+      Rotate immediately and store in AWS Secrets Manager or environment.
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-798
+      category: security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # SQL INJECTION
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: sql-string-concatenation-python
+    patterns:
+      - pattern: $QUERY = "SELECT ..." + $VAR
+      - pattern: $QUERY = "INSERT ..." + $VAR
+      - pattern: $QUERY = "UPDATE ..." + $VAR
+      - pattern: $QUERY = "DELETE ..." + $VAR
+      - pattern: $QUERY = f"SELECT ... {$VAR} ..."
+      - pattern: $QUERY = f"INSERT ... {$VAR} ..."
+      - pattern: $QUERY = f"UPDATE ... {$VAR} ..."
+      - pattern: $QUERY = f"DELETE ... {$VAR} ..."
+    message: >
+      [CRITICAL] SQL query built with string concatenation or f-string
+      interpolation. This enables SQL injection. Use parameterized queries:
+      cursor.execute("SELECT * FROM t WHERE id = %s", (user_id,)) or ORM
+      query builders.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      owasp: A03:2021 - Injection
+      category: security
+
+  - id: sql-string-concatenation-js
+    patterns:
+      - pattern: $QUERY = "SELECT ..." + $VAR
+      - pattern: $QUERY = `SELECT ... ${$VAR} ...`
+      - pattern: $QUERY = "INSERT ..." + $VAR
+      - pattern: $QUERY = `INSERT ... ${$VAR} ...`
+      - pattern: $QUERY = "UPDATE ..." + $VAR
+      - pattern: $QUERY = `UPDATE ... ${$VAR} ...`
+      - pattern: $QUERY = "DELETE ..." + $VAR
+      - pattern: $QUERY = `DELETE ... ${$VAR} ...`
+    message: >
+      [CRITICAL] SQL query built with string concatenation or template
+      literals. This enables SQL injection. Use parameterized queries
+      with ? or $1 placeholders, or an ORM like Prisma/TypeORM.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      owasp: A03:2021 - Injection
+      category: security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # DANGEROUS EVAL / CODE EXECUTION
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: eval-with-dynamic-input
+    patterns:
+      - pattern: eval($VAR)
+      - pattern: eval(f"... {$VAR} ...")
+    message: >
+      [CRITICAL] eval() called with dynamic input. This is a remote code
+      execution vector if any part of the argument is user-controlled.
+      Never use eval() with untrusted data.
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-95
+      category: security
+
+  - id: new-function-dynamic
+    patterns:
+      - pattern: new Function($VAR)
+      - pattern: new Function(..., $VAR)
+    message: >
+      [CRITICAL] new Function() with dynamic input is equivalent to eval().
+      This is a remote code execution vector. Avoid entirely.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: CWE-95
+      category: security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # PATH TRAVERSAL
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: open-with-user-input
+    patterns:
+      - pattern: open($PATH, ...)
+        metavariable-pattern:
+          metavariable: $PATH
+          pattern-not: "..."
+    message: >
+      [HIGH] File open with a non-literal path. If this path is derived from
+      user input, validate it against an allowlist and canonicalize with
+      os.path.realpath() before use. Verify the resolved path stays within
+      the expected directory.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-22
+      category: security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # EMPTY ERROR HANDLING (silent failure)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  - id: bare-except-python
+    pattern: |
+      try:
+        ...
+      except:
+        pass
+    message: >
+      [MEDIUM] Bare except clause silently swallows all errors including
+      KeyboardInterrupt and SystemExit. Catch specific exception types and
+      log the error with context.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-390
+      category: correctness
+
+  - id: empty-catch-javascript
+    patterns:
+      - pattern: |
+          try {
+            ...
+          } catch ($E) {}
+      - pattern: |
+          try {
+            ...
+          } catch ($E) {
+            // ...
+          }
+    message: >
+      [MEDIUM] Empty or comment-only catch block. Silent failure hides bugs.
+      Log minimum: error type, message, and calling context.
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: CWE-390
+      category: correctness
